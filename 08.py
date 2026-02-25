@@ -1,11 +1,13 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import utils
-import os
 import glob
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from src import utils
 
 # ================= 參數設定 =================
-JSF_DIR = r'data\sbp'
+JSF_DIR = r"data\sbp"
 CC_VALUE = 8.5867e07
 BLANKING = 10
 
@@ -23,6 +25,7 @@ RL_Y_MAX = 27
 
 
 # ===========================================
+
 
 def main():
     jsf_files = sorted(glob.glob(os.path.join(JSF_DIR, "*.jsf")))
@@ -43,7 +46,7 @@ def main():
 
     print("Reading raw samples...")
     for i, p in enumerate(raw_data):
-        amps = np.array(p['amps'], dtype=float)
+        amps = np.array(p["amps"], dtype=float)
 
         # 紀錄最大的樣本數長度 (作為 Y 軸最大值)
         if len(amps) > max_samples:
@@ -66,8 +69,10 @@ def main():
 
                 if amp_1 > 0:
                     R = (r_1 * amp_1) / CC_VALUE
-                    if R > 1.0: R = 1.0
-                    if R < 0.0001: R = 0.0001
+                    if R > 1.0:
+                        R = 1.0
+                    if R < 0.0001:
+                        R = 0.0001
                     rl_val = -20 * np.log10(R)
                     list_rls.append(rl_val)
                 else:
@@ -97,21 +102,27 @@ def main():
     # Y軸：0 在最上面，max_samples 在最下面
     extent = [0, n_pings, max_samples, 0]
 
-    ax1.imshow(sbp_image, aspect='auto', cmap='gray_r',
-               vmin=SBP_VMIN, vmax=SBP_VMAX, interpolation='nearest',
-               extent=extent)
+    ax1.imshow(
+        sbp_image,
+        aspect="auto",
+        cmap="gray_r",
+        vmin=SBP_VMIN,
+        vmax=SBP_VMAX,
+        interpolation="nearest",
+        extent=extent,
+    )
 
-    ax1.set_ylabel('Sample Index', fontsize=12)  # Y軸改為樣本點編號
-    ax1.set_title(f"3", fontsize=12, fontweight='bold')
+    ax1.set_ylabel("Sample Index", fontsize=12)  # Y軸改為樣本點編號
+    ax1.set_title(f"3", fontsize=12, fontweight="bold")
 
     # --- 下圖：RL 曲線 ---
-    ax2.plot(pings, rl_curve, color='#0055aa', linewidth=1)
+    ax2.plot(pings, rl_curve, color="#0055aa", linewidth=1)
 
     ax2.set_ylim(RL_Y_MIN, RL_Y_MAX)
-    ax2.set_ylabel('Reflection Loss (dB)', fontsize=12)
-    ax2.set_xlabel('Ping Number', fontsize=12)
+    ax2.set_ylabel("Reflection Loss (dB)", fontsize=12)
+    ax2.set_xlabel("Ping Number", fontsize=12)
 
-    ax2.grid(True, linestyle='--', alpha=0.5)
+    ax2.grid(True, linestyle="--", alpha=0.5)
 
     plt.tight_layout()
     plt.show()

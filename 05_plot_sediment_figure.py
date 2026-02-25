@@ -1,19 +1,21 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.cm as cm
-import utils
-import os
 import glob
+import os
+
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter, binary_dilation
 from matplotlib.ticker import FuncFormatter
 from pykrige.ok import OrdinaryKriging
+from scipy.interpolate import griddata
+from scipy.ndimage import binary_dilation
+
+from src import utils
 
 # ================= 參數設定 (完全保留您的設定) =================
-JSF_DIR = r'data\sbp'
-MBES_FILE = r'data\multibeam\G1m_142m.txt'
+JSF_DIR = r"data\sbp"
+MBES_FILE = r"data\multibeam\G1m_142m.txt"
 
 CC_VALUE = 8.5867e07
 BLANKING = 1
@@ -27,7 +29,7 @@ SMOOTH_SIGMA = 4
 # RL 顏色
 RL_VMIN = 0
 RL_VMAX = 35
-RL_CMAP = 'jet_r'
+RL_CMAP = "jet_r"
 RL_ALPHA = 0.8
 
 # 等深線參數
@@ -37,6 +39,7 @@ LABEL_INTERVAL = 7
 
 
 # ========================================================
+
 
 def to_dms(x):
     """計算度分秒數值"""
@@ -67,20 +70,24 @@ def get_sbp_data_points():
     for jsf in jsf_files:
         data = utils.read_jsf(jsf)
         for p in data:
-            amps = p['amps']
-            if len(amps) < 100: continue
+            amps = p["amps"]
+            if len(amps) < 100:
+                continue
             search_region = amps[BLANKING:]
-            if len(search_region) == 0: continue
+            if len(search_region) == 0:
+                continue
             idx_max = np.argmax(search_region) + BLANKING
             amp_1 = float(amps[idx_max])
             r_1 = float(idx_max)
             if amp_1 > 0:
                 R = (r_1 * amp_1) / CC_VALUE
-                if R > 1.0: R = 1.0
-                if R < 0.0001: R = 0.0001
+                if R > 1.0:
+                    R = 1.0
+                if R < 0.0001:
+                    R = 0.0001
                 RL = -20 * np.log10(R)
-                track_lons.append(p['lon'])
-                track_lats.append(p['lat'])
+                track_lons.append(p["lon"])
+                track_lats.append(p["lat"])
                 track_rls.append(RL)
     return np.array(track_lons), np.array(track_lats), np.array(track_rls)
 
@@ -94,9 +101,9 @@ def main():
 
     print(f"Loading Multibeam data: {os.path.basename(MBES_FILE)}...")
     try:
-        df = pd.read_csv(MBES_FILE, sep=r'\s+', header=None, names=['x', 'y', 'z'])
-        bg_lons, bg_lats = utils.twd97_to_wgs84(df['x'].values, df['y'].values)
-        bg_depths = df['z'].values
+        df = pd.read_csv(MBES_FILE, sep=r"\s+", header=None, names=["x", "y", "z"])
+        bg_lons, bg_lats = utils.twd97_to_wgs84(df["x"].values, df["y"].values)
+        bg_depths = df["z"].values
 
         # 取得資料範圍
         min_x, max_x = np.min(bg_lons), np.max(bg_lons)
@@ -109,7 +116,7 @@ def main():
         return
 
     fig, ax = plt.subplots(figsize=FIG_SIZE, dpi=DPI)
-    ax.set_facecolor('white')
+    ax.set_facecolor("white")
 
     # 2. 建立網格
     padding_x = data_width * 0.01
@@ -120,15 +127,25 @@ def main():
     grid_x, grid_y = np.meshgrid(x_lin, y_lin)
 
     # 3. 製作遮罩
-    idx_x = ((bg_lons - (min_x - padding_x)) / ((max_x + padding_x) - (min_x - padding_x)) * (num_grid - 1)).astype(int)
-    idx_y = ((bg_lats - (min_y - padding_y)) / ((max_y + padding_y) - (min_y - padding_y)) * (num_grid - 1)).astype(int)
+    idx_x = (
+        (bg_lons - (min_x - padding_x))
+        / ((max_x + padding_x) - (min_x - padding_x))
+        * (num_grid - 1)
+    ).astype(int)
+    idx_y = (
+        (bg_lats - (min_y - padding_y))
+        / ((max_y + padding_y) - (min_y - padding_y))
+        * (num_grid - 1)
+    ).astype(int)
     valid_mask = (idx_x >= 0) & (idx_x < num_grid) & (idx_y >= 0) & (idx_y < num_grid)
     shape_mask = np.zeros((num_grid, num_grid), dtype=bool)
     shape_mask[idx_y[valid_mask], idx_x[valid_mask]] = True
     shape_mask = binary_dilation(shape_mask, iterations=3)
 
     # 4. 處理地形資料
-    grid_depth = griddata((bg_lons, bg_lats), bg_depths, (grid_x, grid_y), method='linear')
+    grid_depth = griddata(
+        (bg_lons, bg_lats), bg_depths, (grid_x, grid_y), method="linear"
+    )
     grid_depth[~shape_mask] = np.nan
     grid_depth = np.abs(grid_depth)  # 取絕對值
 
@@ -144,9 +161,20 @@ def main():
     #            colors='black', linewidths=0.3, alpha=0.8, zorder=2, linestyles='solid')
 
     # 粗線 (實線)
-    levels_thick = np.arange(np.round(base_level / 7) * 7, top_level + 1, CONTOUR_THICK_STEP)
-    CS_thick = ax.contour(grid_x, grid_y, grid_depth, levels=levels_thick,
-                          colors='black', linewidths=0.6, alpha=1.0, zorder=2, linestyles='solid')
+    levels_thick = np.arange(
+        np.round(base_level / 7) * 7, top_level + 1, CONTOUR_THICK_STEP
+    )
+    CS_thick = ax.contour(
+        grid_x,
+        grid_y,
+        grid_depth,
+        levels=levels_thick,
+        colors="black",
+        linewidths=0.6,
+        alpha=1.0,
+        zorder=2,
+        linestyles="solid",
+    )
 
     # # 標籤過濾 (避免數字太多)
     # levels_label = [l for l in levels_thick if l % LABEL_INTERVAL == 0]
@@ -181,16 +209,18 @@ def main():
             sbp_lons,
             sbp_lats,
             sbp_rls,
-            variogram_model='exponential',
+            variogram_model="exponential",
             nlags=15,  # 變異函數的計算階層數
-            enable_plotting=False  # 設為 True 可以查看半變異函數圖
+            enable_plotting=False,  # 設為 True 可以查看半變異函數圖
         )
 
         # --- [新增] 執行插值 ---
         # PyKrige 的 'grid' 模式直接吃一維的 X 和 Y 軸座標 (就是你前面建好的 x_lin, y_lin)
         # 這裡會花費較多時間計算
         print("Executing Kriging interpolation (This might take a while...)")
-        grid_rl_krige, ss_krige = OK.execute('grid', x_lin, y_lin, backend='loop', n_closest_points=100)
+        grid_rl_krige, ss_krige = OK.execute(
+            "grid", x_lin, y_lin, backend="loop", n_closest_points=100
+        )
 
         # 提取運算結果 (轉為 numpy array)
         grid_rl = np.array(grid_rl_krige, dtype=float)
@@ -209,10 +239,17 @@ def main():
         print(f"RL Data Range: Min={data_vmin:.2f}, Max={data_vmax:.2f}")
 
         # 2. 繪圖時使用動態範圍
-        mesh = ax.pcolormesh(grid_x, grid_y, grid_rl,
-                             cmap=RL_CMAP,
-                             vmin=data_vmin, vmax=data_vmax,
-                             shading='auto', alpha=RL_ALPHA, zorder=1)
+        mesh = ax.pcolormesh(
+            grid_x,
+            grid_y,
+            grid_rl,
+            cmap=RL_CMAP,
+            vmin=data_vmin,
+            vmax=data_vmax,
+            shading="auto",
+            alpha=RL_ALPHA,
+            zorder=1,
+        )
 
         # 3. Colorbar 也使用動態範圍
         norm = mcolors.Normalize(vmin=data_vmin, vmax=data_vmax)
@@ -220,7 +257,7 @@ def main():
         sm = cm.ScalarMappable(norm=norm, cmap=RL_CMAP)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.04)
-        cbar.set_label('RL (dB)', rotation=270, labelpad=15)
+        cbar.set_label("RL (dB)", rotation=270, labelpad=15)
         cbar.solids.set_alpha(1.0)
     else:
         print("No SBP data found.")
@@ -231,9 +268,9 @@ def main():
     # 座標格式設定 (E/N)
     ax.xaxis.set_major_formatter(FuncFormatter(lon_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(lat_formatter))
-    plt.setp(ax.get_xticklabels(), ha='right')
+    plt.setp(ax.get_xticklabels(), ha="right")
 
-    ax.grid(True, linestyle='-', alpha=0.2, zorder=0)
+    ax.grid(True, linestyle="-", alpha=0.2, zorder=0)
 
     # ----------------------------------------------------
     # 自動置中算法 (解決 Ignoring fixed y limits 警告)
@@ -266,11 +303,11 @@ def main():
         ax.set_xlim(cx - target_dx / 2, cx + target_dx / 2)
         ax.set_ylim(cy - target_dy / 2, cy + target_dy / 2)
 
-    ax.set_aspect('equal')  # 鎖定比例
+    ax.set_aspect("equal")  # 鎖定比例
 
     for spine in ax.spines.values():
         spine.set_linewidth(1.5)
-        spine.set_color('black')
+        spine.set_color("black")
 
     plt.tight_layout()
     plt.show()
