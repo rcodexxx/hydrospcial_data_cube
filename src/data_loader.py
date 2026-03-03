@@ -5,6 +5,7 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+import rasterio
 
 
 def read_xyz(file_path) -> pd.DataFrame:
@@ -14,7 +15,7 @@ def read_xyz(file_path) -> pd.DataFrame:
 
 def read_jsf(file_path) -> List[Dict[str, any]]:
     """
-    Parses EdgeTech JSF files (Msg 80 only).
+    Parses EdgeTech JSF files.
     Returns list of dicts: {'ping', 'lon', 'lat', 'amps'}.
     """
     file_path = Path(file_path)
@@ -85,3 +86,18 @@ def read_jsf(file_path) -> List[Dict[str, any]]:
         raise RuntimeError(f"Error reading JSF({file_path}): {e}") from e
 
     return pings_data
+
+
+def read_geotiff(file_path):
+    with rasterio.open(file_path) as src:
+        grid_depth = src.read(1)
+
+        bounds = src.bounds
+        extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+
+        nodata_val = src.nodata
+        if nodata_val is not None:
+            grid_depth = grid_depth.astype(float)
+            grid_depth[grid_depth == nodata_val] = np.nan
+
+    return grid_depth, extent
