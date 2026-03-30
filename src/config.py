@@ -1,13 +1,21 @@
-from pathlib import Path
+"""
+src/config.py
+Site-specific configuration.
+Update SOUND_SPEED for each survey site based on SVP cast.
+"""
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-MB_PATH = BASE_DIR / "data" / "multibeam" / "G1m_142m.txt"
-SBP_PATH = BASE_DIR / "data" / "sbp"
-TIF_PATH = BASE_DIR / "data" / "G1m_142m.tif"
+# Measured sound velocity (depth-weighted average from SVP)
+# Mudan Reservoir, 2025-12-22/23
+SOUND_SPEED = 1489.073
 
-FIGURE_STYLE = {
-    "figsize": (8, 6),
-    "dpi": 150,
-}
+# Coordinate reference system
+EPSG = 3826  # TWD97 TM2
 
-CC = 80970325.5244343
+# Grid resolution
+RESOLUTION = 0.5  # m
+
+# Water properties for TVG correction
+WATER_TEMP_C  = 25.0   # °C, default if not measured
+WATER_SALINITY = 0.0   # ppt, 0 = freshwater, ~35 = seawater
+
+SBP_CC = 1.642613e+08
