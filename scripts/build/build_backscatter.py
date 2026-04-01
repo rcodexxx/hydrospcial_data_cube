@@ -12,14 +12,14 @@ from src.config import EPSG, RESOLUTION
 
 ROOT     = Path(__file__).parent.parent.parent
 MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-OUT_TIF  = ROOT / "outputs/tif/sss_backscatter_hf.tif"
+OUT_TIF  = ROOT / "outputs/tif/sss_backscatter_lf.tif"
 
 SURVEY_DIRS = {
     ROOT / "data/sss/20251223": 15.0,
     ROOT / "data/sss/20251224": None,
 }
 
-CHANNELS   = ["HF_port", "HF_stbd"]
+CHANNELS   = ["LF_port", "LF_stbd"]
 N_CLUSTERS = 7
 BS_MIN_DB  = -50.0
 

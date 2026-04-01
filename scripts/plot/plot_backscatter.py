@@ -9,8 +9,8 @@ from pyproj import Transformer
 
 ROOT = Path(__file__).parent.parent.parent
 MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-BS_TIF   = ROOT / "outputs/tif/sss_backscatter_hf.tif"
-OUT_FIG  = ROOT / "outputs/figures/backscatter_hf_overview.png"
+BS_TIF   = ROOT / "outputs/tif/sss_backscatter_lf.tif"
+OUT_FIG  = ROOT / "outputs/figures/backscatter_lf.png"
 
 CUT_NORTH = 2449050  # remove turning artifact
 
@@ -72,10 +72,8 @@ def main():
     cax = div.append_axes("right", size="4%", pad=0.05)
     plt.colorbar(im, cax=cax, label="dB")
 
-    ax.set_title("LF Backscatter (dB)", fontsize=12)
+    ax.set_title("Mudan Reservoir — SSS LF Backscatter", fontsize=13)
     setup_ax(ax, bounds, tr)
-
-    plt.suptitle("Mudan Reservoir — SSS LF Backscatter", fontsize=13)
     plt.tight_layout()
     plt.savefig(OUT_FIG, dpi=200, bbox_inches="tight")
     print(f"Saved: {OUT_FIG}")

@@ -16,9 +16,9 @@ SEDIMENT_THRESHOLDS = [
     (10.25, "Silt"),                        # 5: RL < 10.25
     (11.98, "Sandy-silt-clay"),             # 6: RL < 11.98
     (13.20, "Silty clay"),
-    (13.37, "Clayey silt"),    # 7: RL < 13.37
-    (22.40, "Framework-supported mud"),     # 8: RL < 22.40 (過渡態壓實軟泥, 孔隙率 < 88%)
-    (float('inf'), "Fluid mud")             # 9: RL >= 22.40 (懸浮態流體泥, 孔隙率 >= 88%)
+    (13.37, "Clayey silt"),                 # 7: RL < 13.37
+    (23.95, "Framework-supported mud"),     # 8: RL < 22.40 (過渡態壓實軟泥, 孔隙率 < 90%)
+    (float('inf'), "Fluid mud")             # 9: RL >= 23.95 (懸浮態流體泥, 孔隙率 >= 90%)
 ]
 
 SEDIMENT_LABELS = [label for _, label in SEDIMENT_THRESHOLDS]
