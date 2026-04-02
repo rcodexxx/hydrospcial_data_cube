@@ -3,6 +3,9 @@ src/config.py
 Site-specific configuration.
 Update SOUND_SPEED for each survey site based on SVP cast.
 """
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent  # src/ → project root
 
 # Measured sound velocity (depth-weighted average from SVP)
 # Mudan Reservoir, 2025-12-22/23
