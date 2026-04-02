@@ -11,9 +11,3 @@ tqdm>=4.65
 ppigrf>=2.0
 xarray>=2024.0
 plotly>=5.0
-
-[dev]
-black>=26.0
-isort>=8.0
-pytest>=9.0
-pytest-timeout>=2.0

@@ -6,10 +6,8 @@ hydrospacial_data_cube.egg-info/requires.txt
 hydrospacial_data_cube.egg-info/top_level.txt
 src/__init__.py
 src/config.py
-src/backscatter/altitude_detect.py
+src/backscatter/correction.py
 src/backscatter/georef.py
-src/backscatter/radiometric.py
-src/backscatter/tvg_correction.py
 src/data_loader/__init__.py
 src/data_loader/read_mag.py
 src/data_loader/read_sbp_jsf.py

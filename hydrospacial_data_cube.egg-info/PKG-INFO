@@ -16,8 +16,3 @@ Requires-Dist: tqdm>=4.65
 Requires-Dist: ppigrf>=2.0
 Requires-Dist: xarray>=2024.0
 Requires-Dist: plotly>=5.0
-Provides-Extra: dev
-Requires-Dist: black>=26.0; extra == "dev"
-Requires-Dist: isort>=8.0; extra == "dev"
-Requires-Dist: pytest>=9.0; extra == "dev"
-Requires-Dist: pytest-timeout>=2.0; extra == "dev"
