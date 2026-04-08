@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hydrospatial Data Cube Viewer</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Leaflet MiniMap -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.css" />
+<script src="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.js"></script>
+
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 100vh; background: #1a1a2e; color: #e0e0e0; }
+
+/* Sidebar */
+#sidebar {
+    width: 360px; min-width: 360px;
+    background: #16213e;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 12px;
+    border-right: 2px solid #0f3460;
+}
+#sidebar h1 { font-size: 18px; color: #e94560; margin-bottom: 4px; }
+#sidebar h2 { font-size: 14px; color: #88aacc; margin-bottom: 6px; }
+
+.section {
+    background: #0f3460;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+/* Layer buttons */
+.layer-btn {
+    display: block; width: 100%;
+    padding: 8px 12px; margin: 4px 0;
+    background: #1a1a2e;
+    color: #ccc; border: 1px solid #333;
+    border-radius: 6px;
+    cursor: pointer; font-size: 13px;
+    text-align: left;
+    transition: all 0.2s;
+}
+.layer-btn:hover { background: #233; border-color: #e94560; }
+.layer-btn.active { background: #e94560; color: white; border-color: #e94560; }
+
+/* Opacity slider */
+.slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.slider-row label { font-size: 12px; color: #aaa; min-width: 60px; }
+.slider-row input[type=range] { flex: 1; }
+
+/* Checkboxes */
+.check-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+
+/* Query panel */
+#query-panel { font-size: 12px; line-height: 1.8; }
+#query-panel .coord { color: #e94560; font-weight: bold; font-size: 13px; }
+#query-panel .label { color: #88aacc; }
+#query-panel .value { color: #fff; }
+#query-panel .nodata { color: #666; }
+
+/* Stats panel */
+#stats-panel { font-size: 12px; line-height: 1.6; }
+
+/* Map */
+#map { flex: 1; background: #1a1a2e; }
+
+/* Coordinate display */
+#coord-display {
+    position: absolute; bottom: 8px; left: 370px; z-index: 1000;
+    background: rgba(22, 33, 62, 0.9);
+    padding: 4px 12px; border-radius: 4px;
+    font-size: 12px; color: #e0e0e0;
+    pointer-events: none;
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-control-zoom a { background: #16213e !important; color: #e0e0e0 !important; border-color: #333 !important; }
+.leaflet-control-layers { background: #16213e !important; color: #e0e0e0 !important; }
+
+/* Sediment legend */
+.sed-legend { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
+.sed-chip {
+    font-size: 10px; padding: 2px 6px;
+    border-radius: 3px; color: #000;
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+    <h1>🌊 Hydrospatial Data Cube</h1>
+    <p style="font-size:11px; color:#666;">Mudan Reservoir UCH Survey</p>
+
+    <!-- Layer Selection -->
+    <div class="section">
+        <h2>📍 Overlay Layer</h2>
+        <button class="layer-btn active" data-layer="bathymetry">Bathymetry</button>
+        <button class="layer-btn" data-layer="imagery_lf">SSS Imagery LF</button>
+        <button class="layer-btn" data-layer="imagery_hf">SSS Imagery HF</button>
+        <button class="layer-btn" data-layer="sediment_class">Sediment Class</button>
+        <button class="layer-btn" data-layer="mag_residual">Magnetic Residual</button>
+
+        <div class="slider-row">
+            <label>Opacity</label>
+            <input type="range" id="opacity-slider" min="0" max="100" value="75">
+        </div>
+    </div>
+
+    <!-- Options -->
+    <div class="section">
+        <h2>⚙️ Display</h2>
+        <div class="check-row">
+            <input type="checkbox" id="chk-contour" checked>
+            <label for="chk-contour">Contour Lines</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" id="chk-tracklines">
+            <label for="chk-tracklines">Survey Tracklines</label>
+        </div>
+    </div>
+
+    <!-- Point Query -->
+    <div class="section">
+        <h2>🔍 Point Query</h2>
+        <div id="query-panel">
+            <span class="nodata">Click on the map to query all layers.</span>
+        </div>
+    </div>
+
+    <!-- Region Stats -->
+    <div class="section">
+        <h2>📐 Region Stats</h2>
+        <div id="stats-panel">
+            <span class="nodata">Use Shift+Drag to select a region.</span>
+        </div>
+    </div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Coordinate display -->
+<div id="coord-display">—</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────
+const API = '';  // same origin
+
+// sediment colors
+const SED_COLORS = [
+    '#d73027','#f46d43','#fdae61','#fee08b','#ffffbf',
+    '#e6f598','#d9ef8b','#a6d96a','#66bd63','#1a9850','#4575b4'
+];
+const SED_LABELS = [
+    'Coarse sand','Fine sand','Very fine sand','Silty sand',
+    'Sandy silt','Silt','Sandy-silt-clay','Silty clay',
+    'Clayey silt','Framework-supported mud','Fluid mud'
+];
+
+// ── State ───────────────────────────────────────────────────
+let currentOverlay = null;
+let currentLayer = 'bathymetry';
+let tileLayers = {};
+let layerConfig = {};
+let clickMarker = null;
+let selectRect = null;
+
+// ── Init map ────────────────────────────────────────────────
+const map = L.map('map', {
+    center: [22.137, 120.785],
+    zoom: 16,
+    maxZoom: 22,
+    minZoom: 14,
+    zoomControl: true,
+});
+
+// ESRI satellite basemap
+const esri = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Esri', maxZoom: 22 }
+);
+esri.addTo(map);
+
+// minimap
+const minimapLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 22 }
+);
+const minimap = new L.Control.MiniMap(minimapLayer, {
+    position: 'bottomleft',
+    width: 180, height: 140,
+    zoomLevelOffset: -5,
+    toggleDisplay: true,
+}).addTo(map);
+
+// ── Load layers from API ────────────────────────────────────
+fetch(API + '/api/layers')
+    .then(r => r.json())
+    .then(data => {
+        layerConfig = data.layers;
+
+        // set map bounds
+        if (data.bounds) {
+            const bounds = L.latLngBounds(data.bounds);
+            map.setMaxBounds(bounds.pad(0.3));
+            map.fitBounds(bounds);
+        }
+
+        // create tile layers
+        for (const [key, cfg] of Object.entries(layerConfig)) {
+            tileLayers[key] = L.tileLayer(cfg.url, {
+                opacity: 0.75,
+                maxZoom: 22,
+            });
+        }
+
+        // show default layer
+        if (tileLayers['bathymetry']) {
+            tileLayers['bathymetry'].addTo(map);
+            currentOverlay = tileLayers['bathymetry'];
+            currentLayer = 'bathymetry';
+        }
+    })
+    .catch(err => console.error('Failed to load layers:', err));
+
+// ── Layer switching ─────────────────────────────────────────
+document.querySelectorAll('.layer-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const layer = btn.dataset.layer;
+        if (!tileLayers[layer]) return;
+
+        // update button state
+        document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // swap layer
+        if (currentOverlay) map.removeLayer(currentOverlay);
+        tileLayers[layer].setOpacity(
+            document.getElementById('opacity-slider').value / 100
+        );
+        tileLayers[layer].addTo(map);
+        currentOverlay = tileLayers[layer];
+        currentLayer = layer;
+    });
+});
+
+// opacity slider
+document.getElementById('opacity-slider').addEventListener('input', (e) => {
+    if (currentOverlay) {
+        currentOverlay.setOpacity(e.target.value / 100);
+    }
+});
+
+// ── Mouse move: coordinate display ──────────────────────────
+map.on('mousemove', (e) => {
+    const lat = e.latlng.lat.toFixed(6);
+    const lon = e.latlng.lng.toFixed(6);
+    document.getElementById('coord-display').textContent =
+        `${lat}°N, ${lon}°E`;
+});
+
+// ── Click: point query ──────────────────────────────────────
+map.on('click', (e) => {
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+
+    // place/move marker
+    if (clickMarker) {
+        clickMarker.setLatLng([lat, lon]);
+    } else {
+        clickMarker = L.circleMarker([lat, lon], {
+            radius: 7, color: '#e94560', fillColor: '#e94560',
+            fillOpacity: 0.8, weight: 2,
+        }).addTo(map);
+    }
+
+    // query API
+    const panel = document.getElementById('query-panel');
+    panel.innerHTML = '<span class="nodata">Loading...</span>';
+
+    fetch(`${API}/api/query?lat=${lat}&lon=${lon}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                panel.innerHTML = `<span class="nodata">${data.error}</span>`;
+                return;
+            }
+
+            let html = `<div class="coord">${lat.toFixed(6)}°N, ${lon.toFixed(6)}°E</div>`;
+
+            for (const [key, info] of Object.entries(data)) {
+                if (['lat','lon','x_3826','y_3826'].includes(key)) continue;
+                if (!info || !info.name) continue;
+
+                if (info.value === null) {
+                    html += `<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
+                } else if (key === 'sediment_class') {
+                    const color = SED_COLORS[info.class_id] || '#888';
+                    html += `<div><span class="label">${info.name}:</span> `
+                         + `<span class="sed-chip" style="background:${color}">${info.value}</span></div>`;
+                } else {
+                    html += `<div><span class="label">${info.name}:</span> `
+                         + `<span class="value">${info.value} ${info.units}</span></div>`;
+                }
+            }
+            panel.innerHTML = html;
+        })
+        .catch(err => {
+            panel.innerHTML = `<span class="nodata">Error: ${err.message}</span>`;
+        });
+});
+
+// ── Shift+Drag: region select ───────────────────────────────
+let selectStart = null;
+
+map.on('mousedown', (e) => {
+    if (!e.originalEvent.shiftKey) return;
+    selectStart = e.latlng;
+    map.dragging.disable();
+});
+
+map.on('mousemove', (e) => {
+    if (!selectStart) return;
+    if (selectRect) map.removeLayer(selectRect);
+    selectRect = L.rectangle(
+        [selectStart, e.latlng],
+        { color: '#e94560', weight: 2, fillOpacity: 0.15 }
+    ).addTo(map);
+});
+
+map.on('mouseup', (e) => {
+    if (!selectStart) return;
+    map.dragging.enable();
+
+    const bounds = L.latLngBounds(selectStart, e.latlng);
+    selectStart = null;
+
+    if (bounds.getNorthEast().equals(bounds.getSouthWest())) return;
+
+    // convert to EPSG:3826 (approximate via API)
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
+
+    // query stats
+    // we need to convert lat/lon to 3826 on server side
+    const panel = document.getElementById('stats-panel');
+    panel.innerHTML = '<span class="nodata">Loading...</span>';
+
+    fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`)
+        .then(r => r.json())
+        .then(sw_data => {
+            fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`)
+                .then(r => r.json())
+                .then(ne_data => {
+                    const x0 = sw_data.x_3826, y0 = sw_data.y_3826;
+                    const x1 = ne_data.x_3826, y1 = ne_data.y_3826;
+
+                    fetch(`${API}/api/stats?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`)
+                        .then(r => r.json())
+                        .then(stats => {
+                            let html = `<div style="color:#e94560;font-weight:bold;">`
+                                     + `${stats.width_m} × ${stats.height_m} m</div>`;
+                            html += `<div style="font-size:11px;color:#888;">`
+                                  + `SW: ${stats.sw.lat}°N, ${stats.sw.lon}°E<br>`
+                                  + `NE: ${stats.ne.lat}°N, ${stats.ne.lon}°E</div>`;
+
+                            for (const [key, info] of Object.entries(stats.layers)) {
+                                if (info.value === null && !info.dominant) {
+                                    html += `<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
+                                } else if (info.dominant) {
+                                    html += `<div><span class="label">${info.name}:</span> `
+                                         + `<span class="value">${info.dominant} (${info.purity}%)</span></div>`;
+                                } else {
+                                    html += `<div><span class="label">${info.name}:</span> `
+                                         + `<span class="value">${info.min}~${info.max} ${info.units}, μ=${info.mean}</span></div>`;
+                                }
+                            }
+                            panel.innerHTML = html;
+                        });
+                });
+        })
+        .catch(err => {
+            panel.innerHTML = `<span class="nodata">Error: ${err.message}</span>`;
+        });
+
+    // zoom to selection
+    map.fitBounds(bounds, { padding: [20, 20] });
+});
+
+// ── Keyboard shortcut: R to reset view ──────────────────────
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') {
+        if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
+        // reset to full extent
+        fetch(API + '/api/layers')
+            .then(r => r.json())
+            .then(data => {
+                if (data.bounds) {
+                    map.fitBounds(data.bounds);
+                }
+            });
+    }
+});
+</script>
+</body>
+</html>

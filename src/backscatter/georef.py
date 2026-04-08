@@ -102,8 +102,8 @@ def georef_line(jsf_path, mbes_tif, channel,
         pulse_width_s = 50e-6
 
     side = -90.0 if "port" in channel else 90.0
-    out  = {k: [] for k in ("lat", "lon", "bs", "altitude",
-                             "ground_m", "slant_m", "inc_angle", "ping_idx")}
+    out = {k: [] for k in ("lat", "lon", "bs", "altitude",
+                           "ground_m", "slant_m", "inc_angle", "ping_idx", "heading")}
     last_turn_time = -np.inf
     prev_heading   = None
     ping_counter   = 0
@@ -184,6 +184,7 @@ def georef_line(jsf_path, mbes_tif, channel,
         out["slant_m"].append(sv.astype(np.float32))
         out["inc_angle"].append(inc_v.astype(np.float32))
         out["ping_idx"].append(np.full(n, ping_counter, dtype=np.int32))
+        out["heading"].append(np.full(n, heading, dtype=np.float32))
         ping_counter += 1
 
     if not out["bs"]:
