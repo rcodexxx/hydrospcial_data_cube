@@ -107,69 +107,69 @@ def main():
 
     extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
 
-    # ── Figure 1: Acoustic Impedance ──────────────────────────
-    fig1, ax1 = plt.subplots(figsize=(10, 8))
-    z_lo, z_hi = np.nanpercentile(z[np.isfinite(z)], [2, 98])
-    im = ax1.imshow(z, extent=extent, origin="upper", cmap="turbo",
-                    vmin=z_lo, vmax=z_hi, aspect="equal")
-    ax1.set_facecolor("#cccccc")
-    cb = plt.colorbar(im, ax=ax1, shrink=0.75, pad=0.02)
-    cb.set_label("Acoustic Impedance (Pa·s/m)", fontsize=10)
-    cb.formatter.set_scientific(True)
-    cb.formatter.set_powerlimits((6, 6))
-    cb.update_ticks()
-    ax1.set_title("Mudan Reservoir — Acoustic Impedance", fontsize=13)
-    setup_ax(ax1, bounds, crs)
-    plt.tight_layout()
-    plt.savefig(OUT_DIR / "sub_bottom_impedance.png", dpi=200, bbox_inches="tight")
-    print(f"Saved: {OUT_DIR / 'sub_bottom_impedance.png'}")
+    # # ── Figure 1: Acoustic Impedance ──────────────────────────
+    # fig1, ax1 = plt.subplots(figsize=(10, 8))
+    # z_lo, z_hi = np.nanpercentile(z[np.isfinite(z)], [2, 98])
+    # im = ax1.imshow(z, extent=extent, origin="upper", cmap="turbo",
+    #                 vmin=z_lo, vmax=z_hi, aspect="equal")
+    # ax1.set_facecolor("#cccccc")
+    # cb = plt.colorbar(im, ax=ax1, shrink=0.75, pad=0.02)
+    # cb.set_label("Acoustic Impedance (Pa·s/m)", fontsize=10)
+    # cb.formatter.set_scientific(True)
+    # cb.formatter.set_powerlimits((6, 6))
+    # cb.update_ticks()
+    # ax1.set_title("Mudan Reservoir — Acoustic Impedance", fontsize=13)
+    # setup_ax(ax1, bounds, crs)
+    # plt.tight_layout()
+    # plt.savefig(OUT_DIR / "sub_bottom_impedance.png", dpi=200, bbox_inches="tight")
+    # print(f"Saved: {OUT_DIR / 'sub_bottom_impedance.png'}")
 
-    # ── Figure 2: Pulse Width ─────────────────────────────────
-    fig2, ax2 = plt.subplots(figsize=(10, 8))
-    pw_lo, pw_hi = np.nanpercentile(pw[np.isfinite(pw)], [2, 98])
-    im = ax2.imshow(pw, extent=extent, origin="upper", cmap="RdYlBu_r",
-                    vmin=pw_lo, vmax=pw_hi, aspect="equal")
-    ax2.set_facecolor("#cccccc")
-    cb = plt.colorbar(im, ax=ax2, shrink=0.75, pad=0.02)
-    cb.set_label("Pulse Width at Half Maximum (m)", fontsize=10)
-    ax2.set_title("Mudan Reservoir — Seafloor Return Pulse Width", fontsize=13)
-    setup_ax(ax2, bounds, crs)
-    plt.tight_layout()
-    plt.savefig(OUT_DIR / "sub_bottom_pulse_width.png", dpi=200, bbox_inches="tight")
-    print(f"Saved: {OUT_DIR / 'sub_bottom_pulse_width.png'}")
+    # # ── Figure 2: Pulse Width ─────────────────────────────────
+    # fig2, ax2 = plt.subplots(figsize=(10, 8))
+    # pw_lo, pw_hi = np.nanpercentile(pw[np.isfinite(pw)], [2, 98])
+    # im = ax2.imshow(pw, extent=extent, origin="upper", cmap="RdYlBu_r",
+    #                 vmin=pw_lo, vmax=pw_hi, aspect="equal")
+    # ax2.set_facecolor("#cccccc")
+    # cb = plt.colorbar(im, ax=ax2, shrink=0.75, pad=0.02)
+    # cb.set_label("Pulse Width at Half Maximum (m)", fontsize=10)
+    # ax2.set_title("Mudan Reservoir — Seafloor Return Pulse Width", fontsize=13)
+    # setup_ax(ax2, bounds, crs)
+    # plt.tight_layout()
+    # plt.savefig(OUT_DIR / "sub_bottom_pulse_width.png", dpi=200, bbox_inches="tight")
+    # print(f"Saved: {OUT_DIR / 'sub_bottom_pulse_width.png'}")
 
-    # ── Figure 3: Sediment Classification ─────────────────────
-    fig3, ax3 = plt.subplots(figsize=(10, 8))
-    n_cls = len(SEDIMENT_LABELS)
-    cmap_sed = mcolors.ListedColormap(SED_COLORS)
-    bounds_sed = np.arange(-0.5, n_cls, 1)
-    norm_sed = mcolors.BoundaryNorm(bounds_sed, cmap_sed.N)
+    # # ── Figure 3: Sediment Classification ─────────────────────
+    # fig3, ax3 = plt.subplots(figsize=(10, 8))
+    # n_cls = len(SEDIMENT_LABELS)
+    # cmap_sed = mcolors.ListedColormap(SED_COLORS)
+    # bounds_sed = np.arange(-0.5, n_cls, 1)
+    # norm_sed = mcolors.BoundaryNorm(bounds_sed, cmap_sed.N)
 
-    sed_m = np.ma.masked_where(~np.isfinite(sed) | (sed < 0), sed)
-    im = ax3.imshow(sed_m, extent=extent, origin="upper",
-                    cmap=cmap_sed, norm=norm_sed, aspect="equal")
-    ax3.set_facecolor("#e0e0e0")
-    cbar = plt.colorbar(im, ax=ax3, ticks=range(n_cls), shrink=0.75, pad=0.02)
-    cbar.ax.set_yticklabels(SEDIMENT_LABELS, fontsize=7)
-    cbar.set_label("Sediment Type (coarse → fluid)", fontsize=10)
-    ax3.set_title("Mudan Reservoir — Sediment Classification", fontsize=13)
-    setup_ax(ax3, bounds, crs)
-    plt.tight_layout()
-    plt.savefig(OUT_DIR / "sub_bottom_sediment.png", dpi=200, bbox_inches="tight")
-    print(f"Saved: {OUT_DIR / 'sub_bottom_sediment.png'}")
+    # sed_m = np.ma.masked_where(~np.isfinite(sed) | (sed < 0), sed)
+    # im = ax3.imshow(sed_m, extent=extent, origin="upper",
+    #                 cmap=cmap_sed, norm=norm_sed, aspect="equal")
+    # ax3.set_facecolor("#e0e0e0")
+    # cbar = plt.colorbar(im, ax=ax3, ticks=range(n_cls), shrink=0.75, pad=0.02)
+    # cbar.ax.set_yticklabels(SEDIMENT_LABELS, fontsize=7)
+    # cbar.set_label("Sediment Type (coarse → fluid)", fontsize=10)
+    # ax3.set_title("Mudan Reservoir — Sediment Classification", fontsize=13)
+    # setup_ax(ax3, bounds, crs)
+    # plt.tight_layout()
+    # plt.savefig(OUT_DIR / "sub_bottom_sediment.png", dpi=200, bbox_inches="tight")
+    # print(f"Saved: {OUT_DIR / 'sub_bottom_sediment.png'}")
 
     # ── Figure 4: Isopach ─────────────────────────────────────
     fig4, ax4 = plt.subplots(figsize=(10, 8))
 
-    thick_cm = thick * 100
-    t_lo, t_hi = np.nanpercentile(thick_cm[np.isfinite(thick_cm)], [2, 98])
+    thick = thick
+    t_lo, t_hi = np.nanpercentile(thick[np.isfinite(thick)], [2, 98])
 
-    im = ax4.imshow(thick_cm, extent=extent, origin="upper", cmap="viridis",
-                    vmin=50, vmax=90, aspect="equal")
+    im = ax4.imshow(thick, extent=extent, origin="upper", cmap="turbo",
+                    vmin=t_lo, vmax=t_hi, aspect="equal")
 
     ax4.set_facecolor("#cccccc")
     cb = plt.colorbar(im, ax=ax4, shrink=0.75, pad=0.02)
-    cb.set_label("Sediment Thickness (cm)", fontsize=10)
+    cb.set_label("Sediment Thickness (m)", fontsize=10)
     ax4.set_title("Mudan Reservoir — Isopach", fontsize=13)
     setup_ax(ax4, bounds, crs)
     plt.tight_layout()
