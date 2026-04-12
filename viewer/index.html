@@ -4,101 +4,76 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hydrospatial Data Cube Viewer</title>
-
-<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- Leaflet MiniMap -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.css" />
 <script src="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.js"></script>
-
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 100vh; background: #1a1a2e; color: #e0e0e0; }
 
-/* Sidebar */
 #sidebar {
-    width: 360px; min-width: 360px;
+    width: 380px; min-width: 380px;
     background: #16213e;
     padding: 16px;
     overflow-y: auto;
-    display: flex; flex-direction: column; gap: 12px;
+    display: flex; flex-direction: column; gap: 10px;
     border-right: 2px solid #0f3460;
 }
-#sidebar h1 { font-size: 18px; color: #e94560; margin-bottom: 4px; }
-#sidebar h2 { font-size: 14px; color: #88aacc; margin-bottom: 6px; }
+#sidebar h1 { font-size: 18px; color: #e94560; }
+#sidebar h2 { font-size: 13px; color: #88aacc; margin-bottom: 4px; }
 
-.section {
-    background: #0f3460;
-    border-radius: 8px;
-    padding: 12px;
-}
+.section { background: #0f3460; border-radius: 8px; padding: 12px; }
 
-/* Layer buttons */
 .layer-btn {
-    display: block; width: 100%;
-    padding: 8px 12px; margin: 4px 0;
-    background: #1a1a2e;
-    color: #ccc; border: 1px solid #333;
-    border-radius: 6px;
-    cursor: pointer; font-size: 13px;
-    text-align: left;
-    transition: all 0.2s;
+    display: block; width: 100%; padding: 7px 12px; margin: 3px 0;
+    background: #1a1a2e; color: #ccc; border: 1px solid #333;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+    text-align: left; transition: all 0.2s;
 }
 .layer-btn:hover { background: #233; border-color: #e94560; }
 .layer-btn.active { background: #e94560; color: white; border-color: #e94560; }
 
-/* Opacity slider */
-.slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.slider-row label { font-size: 12px; color: #aaa; min-width: 60px; }
+.slider-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.slider-row label { font-size: 12px; color: #aaa; min-width: 55px; }
 .slider-row input[type=range] { flex: 1; }
 
-/* Checkboxes */
-.check-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+.check-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }
 
-/* Query panel */
-#query-panel { font-size: 12px; line-height: 1.8; }
-#query-panel .coord { color: #e94560; font-weight: bold; font-size: 13px; }
-#query-panel .label { color: #88aacc; }
-#query-panel .value { color: #fff; }
-#query-panel .nodata { color: #666; }
+#query-panel, #stats-panel, #trackline-panel { font-size: 12px; line-height: 1.7; }
+.coord { color: #e94560; font-weight: bold; font-size: 13px; }
+.label { color: #88aacc; }
+.value { color: #fff; }
+.nodata { color: #666; }
+.target-title { color: #FFD700; font-weight: bold; font-size: 14px; }
+.trackline-title { color: #4fc3f7; font-weight: bold; font-size: 13px; }
 
-/* Stats panel */
-#stats-panel { font-size: 12px; line-height: 1.6; }
+.sed-chip { font-size: 10px; padding: 2px 6px; border-radius: 3px; color: #000; display: inline-block; }
 
-/* Map */
 #map { flex: 1; background: #1a1a2e; }
 
-/* Coordinate display */
 #coord-display {
-    position: absolute; bottom: 8px; left: 370px; z-index: 1000;
+    position: absolute; bottom: 8px; left: 390px; z-index: 1000;
     background: rgba(22, 33, 62, 0.9);
     padding: 4px 12px; border-radius: 4px;
-    font-size: 12px; color: #e0e0e0;
-    pointer-events: none;
+    font-size: 12px; color: #e0e0e0; pointer-events: none;
 }
 
-/* Leaflet overrides for dark theme */
 .leaflet-control-zoom a { background: #16213e !important; color: #e0e0e0 !important; border-color: #333 !important; }
-.leaflet-control-layers { background: #16213e !important; color: #e0e0e0 !important; }
 
-/* Sediment legend */
-.sed-legend { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
-.sed-chip {
-    font-size: 10px; padding: 2px 6px;
-    border-radius: 3px; color: #000;
-}
+/* trackline legend */
+.tl-legend { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; }
+.tl-legend span::before { content: '━━ '; }
+.tl-sss { color: #42a5f5; }
+.tl-sbp { color: #66bb6a; }
 </style>
 </head>
 <body>
 
-<!-- Sidebar -->
 <div id="sidebar">
     <h1>🌊 Hydrospatial Data Cube</h1>
     <p style="font-size:11px; color:#666;">Mudan Reservoir UCH Survey</p>
 
-    <!-- Layer Selection -->
     <div class="section">
         <h2>📍 Overlay Layer</h2>
         <button class="layer-btn active" data-layer="bathymetry">Bathymetry</button>
@@ -106,27 +81,32 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 10
         <button class="layer-btn" data-layer="imagery_hf">SSS Imagery HF</button>
         <button class="layer-btn" data-layer="sediment_class">Sediment Class</button>
         <button class="layer-btn" data-layer="mag_residual">Magnetic Residual</button>
-
         <div class="slider-row">
             <label>Opacity</label>
             <input type="range" id="opacity-slider" min="0" max="100" value="75">
         </div>
     </div>
 
-    <!-- Options -->
     <div class="section">
         <h2>⚙️ Display</h2>
         <div class="check-row">
-            <input type="checkbox" id="chk-contour" checked>
-            <label for="chk-contour">Contour Lines</label>
+            <input type="checkbox" id="chk-targets" checked>
+            <label for="chk-targets">Targets (TG01-TG09)</label>
         </div>
         <div class="check-row">
-            <input type="checkbox" id="chk-tracklines">
-            <label for="chk-tracklines">Survey Tracklines</label>
+            <input type="checkbox" id="chk-trackline-sss">
+            <label for="chk-trackline-sss">Tracklines (SSS)</label>
+        </div>
+        <div class="check-row">
+            <input type="checkbox" id="chk-trackline-sbp">
+            <label for="chk-trackline-sbp">Tracklines (SBP)</label>
+        </div>
+        <div class="tl-legend" id="tl-legend" style="display:none;">
+            <span class="tl-sss">SSS</span>
+            <span class="tl-sbp">SBP</span>
         </div>
     </div>
 
-    <!-- Point Query -->
     <div class="section">
         <h2>🔍 Point Query</h2>
         <div id="query-panel">
@@ -134,26 +114,25 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 10
         </div>
     </div>
 
-    <!-- Region Stats -->
+    <div class="section" id="trackline-section" style="display:none;">
+        <h2>📏 Trackline</h2>
+        <div id="trackline-panel"></div>
+    </div>
+
     <div class="section">
         <h2>📐 Region Stats</h2>
         <div id="stats-panel">
-            <span class="nodata">Use Shift+Drag to select a region.</span>
+            <span class="nodata">Shift + Drag to select a region.</span>
         </div>
     </div>
 </div>
 
-<!-- Map -->
 <div id="map"></div>
-
-<!-- Coordinate display -->
 <div id="coord-display">—</div>
 
 <script>
-// ── Config ──────────────────────────────────────────────────
-const API = '';  // same origin
+const API = '';
 
-// sediment colors
 const SED_COLORS = [
     '#d73027','#f46d43','#fdae61','#fee08b','#ffffbf',
     '#e6f598','#d9ef8b','#a6d96a','#66bd63','#1a9850','#4575b4'
@@ -164,248 +143,359 @@ const SED_LABELS = [
     'Clayey silt','Framework-supported mud','Fluid mud'
 ];
 
+const TARGETS = [
+    {id:'TG01', lat:22.136756, lon:120.787840, depth:27.2, size:'3.13×0.68×0.2', result:'樹幹',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG02', lat:22.138375, lon:120.789651, depth:17.7, size:'4.13×0.45×0.4', result:'石塊',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG03', lat:22.135644, lon:120.787286, depth:30.0, size:'7.69×6.13×1.1', result:'樹幹與樹枝',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG04', lat:22.138672, lon:120.789286, depth:17.6, size:'5.77×1.37×0.5', result:'樹幹',
+     sss:true, mbes:true, sbp:true, mag:false, dive:true},
+    {id:'TG05', lat:22.138724, lon:120.788889, depth:18.1, size:'3.03×0.40×0.3', result:'樹幹',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG06', lat:22.133582, lon:120.780874, depth:34.3, size:'2.10×0.95×0.1', result:'疑似石塊',
+     sss:true, mbes:true, sbp:false, mag:false, dive:false},
+    {id:'TG07', lat:22.135546, lon:120.780076, depth:21.7, size:'7.50×2.49×0.6', result:'廢棄鋁架',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG08', lat:22.136010, lon:120.779564, depth:23.6, size:'0.61×0.51×0.6', result:'廢棄塑膠水桶',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+    {id:'TG09', lat:22.136240, lon:120.781183, depth:18.0, size:'0.97×0.88×0.7', result:'石塊',
+     sss:true, mbes:true, sbp:false, mag:false, dive:true},
+];
+
 // ── State ───────────────────────────────────────────────────
 let currentOverlay = null;
-let currentLayer = 'bathymetry';
 let tileLayers = {};
-let layerConfig = {};
 let clickMarker = null;
 let selectRect = null;
+let selectStart = null;
+let targetMarkers = [];
+let targetLabels = [];
 
-// ── Init map ────────────────────────────────────────────────
+// tracklines
+let sssLayer = null;
+let sbpLayer = null;
+let selectedTrackline = null;
+let selectedParentLayer = null;
+
+// ── Map ─────────────────────────────────────────────────────
 const map = L.map('map', {
     center: [22.137, 120.785],
     zoom: 16,
     maxZoom: 22,
     minZoom: 14,
-    zoomControl: true,
 });
 
-// ESRI satellite basemap
-const esri = L.tileLayer(
+// ESRI satellite with maxNativeZoom
+L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { attribution: 'Esri', maxZoom: 22 }
-);
-esri.addTo(map);
+    { attribution: 'Esri', maxZoom: 22, maxNativeZoom: 19 }
+).addTo(map);
 
 // minimap
-const minimapLayer = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 22 }
-);
-const minimap = new L.Control.MiniMap(minimapLayer, {
-    position: 'bottomleft',
-    width: 180, height: 140,
-    zoomLevelOffset: -5,
-    toggleDisplay: true,
-}).addTo(map);
+new L.Control.MiniMap(
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19}),
+    { position:'bottomleft', width:180, height:140, zoomLevelOffset:-4, toggleDisplay:true }
+).addTo(map);
 
-// ── Load layers from API ────────────────────────────────────
+// ── Load tile layers ────────────────────────────────────────
 fetch(API + '/api/layers')
     .then(r => r.json())
     .then(data => {
-        layerConfig = data.layers;
-
-        // set map bounds
         if (data.bounds) {
-            const bounds = L.latLngBounds(data.bounds);
-            map.setMaxBounds(bounds.pad(0.3));
-            map.fitBounds(bounds);
+            map.setMaxBounds(L.latLngBounds(data.bounds).pad(0.3));
+            map.fitBounds(L.latLngBounds(data.bounds).pad(0.05));
         }
-
-        // create tile layers
-        for (const [key, cfg] of Object.entries(layerConfig)) {
-            tileLayers[key] = L.tileLayer(cfg.url, {
-                opacity: 0.75,
-                maxZoom: 22,
-            });
+        for (const [key, cfg] of Object.entries(data.layers)) {
+            tileLayers[key] = L.tileLayer(cfg.url, { opacity:0.75, maxZoom:22 });
         }
-
-        // show default layer
         if (tileLayers['bathymetry']) {
             tileLayers['bathymetry'].addTo(map);
             currentOverlay = tileLayers['bathymetry'];
-            currentLayer = 'bathymetry';
         }
-    })
-    .catch(err => console.error('Failed to load layers:', err));
+    });
+
+// ── Targets ─────────────────────────────────────────────────
+TARGETS.forEach(t => {
+    const mk = L.marker([t.lat, t.lon], {
+        icon: L.divIcon({
+            html: `<div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid #FFD700;filter:drop-shadow(1px 1px 2px #000);cursor:pointer;"></div>`,
+            className: '', iconSize:[16,14], iconAnchor:[8,14],
+        }),
+    }).addTo(map);
+
+    const lb = L.marker([t.lat, t.lon], {
+        icon: L.divIcon({
+            html: `<div style="color:#FFD700;font-size:11px;font-weight:bold;text-shadow:1px 1px 1px #000;white-space:nowrap;background:rgba(0,0,0,0.7);padding:1px 4px;border-radius:3px;">${t.id}</div>`,
+            className: '', iconSize:[50,16], iconAnchor:[-5,20],
+        }),
+        interactive: false,
+    }).addTo(map);
+
+    mk.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (clickMarker) clickMarker.setLatLng([t.lat, t.lon]);
+        else { clickMarker = L.circleMarker([t.lat,t.lon],{radius:7,color:'#e94560',fillColor:'#e94560',fillOpacity:0.8,weight:2}).addTo(map); }
+
+        let sensors = [];
+        if(t.sss)sensors.push('SSS'); if(t.mbes)sensors.push('MBES');
+        if(t.sbp)sensors.push('SBP'); if(t.mag)sensors.push('MAG');
+        if(t.dive)sensors.push('水下攝影');
+
+        let html = `<div class="target-title">🔺 ${t.id} — ${t.result}</div>`
+            +`<div>📍 ${t.lat.toFixed(6)}°N, ${t.lon.toFixed(6)}°E</div>`
+            +`<div>🔹 <span class="label">水深:</span> <span class="value">${t.depth} m</span></div>`
+            +`<div>🔹 <span class="label">尺寸:</span> <span class="value">${t.size} m</span></div>`
+            +`<div>🔹 <span class="label">偵測儀器:</span> <span class="value">${sensors.join(', ')}</span></div>`
+            +`<hr style="border-color:#333;margin:6px 0;">`;
+
+        fetch(`${API}/api/query?lat=${t.lat}&lon=${t.lon}`)
+            .then(r=>r.json()).then(data=>{
+                for(const[key,info] of Object.entries(data)){
+                    if(['lat','lon','x_3826','y_3826'].includes(key))continue;
+                    if(!info||!info.name)continue;
+                    if(info.value===null) html+=`<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
+                    else if(key==='sediment_class'){
+                        const c=SED_COLORS[info.class_id]||'#888';
+                        html+=`<div><span class="label">${info.name}:</span> <span class="sed-chip" style="background:${c}">${info.value}</span></div>`;
+                    } else html+=`<div><span class="label">${info.name}:</span> <span class="value">${info.value} ${info.units}</span></div>`;
+                }
+                document.getElementById('query-panel').innerHTML=html;
+            });
+    });
+    targetMarkers.push(mk); targetLabels.push(lb);
+});
+
+document.getElementById('chk-targets').addEventListener('change',(e)=>{
+    targetMarkers.forEach(m=>{if(e.target.checked)m.addTo(map);else map.removeLayer(m);});
+    targetLabels.forEach(l=>{if(e.target.checked)l.addTo(map);else map.removeLayer(l);});
+});
+
+// ── Tracklines ──────────────────────────────────────────────
+let tracklineFeatures = [];
+
+fetch(API + '/api/tracklines')
+    .then(r => r.json())
+    .then(geojson => {
+        tracklineFeatures = geojson.features || [];
+        
+        const commonOptions = {
+            style: (feature) => ({
+                color: feature.properties.instrument === 'SSS' ? '#42a5f5' : '#66bb6a',
+                weight: 2,
+                opacity: 0.6,
+            }),
+            onEachFeature: (feature, layer) => {
+                layer.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    const parentLayer = feature.properties.instrument === 'SSS' ? sssLayer : sbpLayer;
+                    selectTrackline(feature, layer, parentLayer);
+                });
+                layer.on('mouseover', () => {
+                    if (layer !== selectedTrackline) {
+                        layer.setStyle({ weight: 4, opacity: 1 });
+                    }
+                });
+                layer.on('mouseout', () => {
+                    if (layer !== selectedTrackline) {
+                        const parentLayer = feature.properties.instrument === 'SSS' ? sssLayer : sbpLayer;
+                        parentLayer.resetStyle(layer);
+                    }
+                });
+            }
+        };
+
+        sssLayer = L.geoJSON(geojson, {
+            ...commonOptions,
+            filter: (feature) => feature.properties.instrument === 'SSS'
+        });
+
+        sbpLayer = L.geoJSON(geojson, {
+            ...commonOptions,
+            filter: (feature) => feature.properties.instrument === 'SBP'
+        });
+    });
+
+function selectTrackline(feature, layer, parentLayer) {
+    // reset previous selection
+    if (selectedTrackline && selectedParentLayer) {
+        selectedParentLayer.resetStyle(selectedTrackline);
+    }
+
+    // highlight selected
+    layer.setStyle({ weight: 5, opacity: 1, color: '#e94560' });
+    selectedTrackline = layer;
+    selectedParentLayer = parentLayer; // 記錄當前的父圖層
+
+    const props = feature.properties;
+    const coords = feature.geometry.coordinates;
+    const startLL = coords[0];
+    const endLL = coords[coords.length - 1];
+
+    let html = `<div class="trackline-title">📏 ${props.file}</div>`
+        + `<div>🔹 <span class="label">Instrument:</span> <span class="value">${props.instrument}</span></div>`
+        + `<div>🔹 <span class="label">Pings:</span> <span class="value">${props.pings}</span></div>`
+        + `<div>🔹 <span class="label">Start:</span> <span class="value">${startLL[1].toFixed(5)}°N, ${startLL[0].toFixed(5)}°E</span></div>`
+        + `<div>🔹 <span class="label">End:</span> <span class="value">${endLL[1].toFixed(5)}°N, ${endLL[0].toFixed(5)}°E</span></div>`;
+
+    if (props.day) {
+        html += `<div>🔹 <span class="label">Date:</span> <span class="value">${props.day}</span></div>`;
+    }
+
+    document.getElementById('trackline-panel').innerHTML = html;
+    document.getElementById('trackline-section').style.display = 'block';
+}
+
+function updateTracklineUI() {
+    const sssChecked = document.getElementById('chk-trackline-sss').checked;
+    const sbpChecked = document.getElementById('chk-trackline-sbp').checked;
+    
+    // 只要有任何一個打勾，就顯示 Legend
+    document.getElementById('tl-legend').style.display = (sssChecked || sbpChecked) ? 'flex' : 'none';
+    
+    // 如果全部都取消打勾，順便把選取資訊面板關掉
+    if (!sssChecked && !sbpChecked) {
+        document.getElementById('trackline-section').style.display = 'none';
+    }
+}
+
+// 如果取消勾選圖層時，剛好有選中該圖層的線，則清除選取狀態
+function clearSelectionIfHidden(instrumentType) {
+    if (selectedTrackline && selectedTrackline.feature.properties.instrument === instrumentType) {
+        if (selectedParentLayer) selectedParentLayer.resetStyle(selectedTrackline);
+        selectedTrackline = null;
+        selectedParentLayer = null;
+        document.getElementById('trackline-section').style.display = 'none';
+    }
+}
+
+document.getElementById('chk-trackline-sss').addEventListener('change', (e) => {
+    if (e.target.checked && sssLayer) {
+        sssLayer.addTo(map);
+    } else if (sssLayer) {
+        map.removeLayer(sssLayer);
+        clearSelectionIfHidden('SSS');
+    }
+    updateTracklineUI();
+});
+
+document.getElementById('chk-trackline-sbp').addEventListener('change', (e) => {
+    if (e.target.checked && sbpLayer) {
+        sbpLayer.addTo(map);
+    } else if (sbpLayer) {
+        map.removeLayer(sbpLayer);
+        clearSelectionIfHidden('SBP');
+    }
+    updateTracklineUI();
+});
+
 
 // ── Layer switching ─────────────────────────────────────────
 document.querySelectorAll('.layer-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const layer = btn.dataset.layer;
         if (!tileLayers[layer]) return;
-
-        // update button state
         document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-
-        // swap layer
         if (currentOverlay) map.removeLayer(currentOverlay);
-        tileLayers[layer].setOpacity(
-            document.getElementById('opacity-slider').value / 100
-        );
+        tileLayers[layer].setOpacity(document.getElementById('opacity-slider').value / 100);
         tileLayers[layer].addTo(map);
         currentOverlay = tileLayers[layer];
-        currentLayer = layer;
     });
 });
 
-// opacity slider
 document.getElementById('opacity-slider').addEventListener('input', (e) => {
-    if (currentOverlay) {
-        currentOverlay.setOpacity(e.target.value / 100);
-    }
+    if (currentOverlay) currentOverlay.setOpacity(e.target.value / 100);
 });
 
-// ── Mouse move: coordinate display ──────────────────────────
+// ── Mouse move ──────────────────────────────────────────────
 map.on('mousemove', (e) => {
-    const lat = e.latlng.lat.toFixed(6);
-    const lon = e.latlng.lng.toFixed(6);
     document.getElementById('coord-display').textContent =
-        `${lat}°N, ${lon}°E`;
+        `${e.latlng.lat.toFixed(6)}°N, ${e.latlng.lng.toFixed(6)}°E`;
 });
 
 // ── Click: point query ──────────────────────────────────────
 map.on('click', (e) => {
-    const lat = e.latlng.lat;
-    const lon = e.latlng.lng;
+    const lat = e.latlng.lat, lon = e.latlng.lng;
+    if (clickMarker) clickMarker.setLatLng([lat,lon]);
+    else { clickMarker = L.circleMarker([lat,lon],{radius:7,color:'#e94560',fillColor:'#e94560',fillOpacity:0.8,weight:2}).addTo(map); }
 
-    // place/move marker
-    if (clickMarker) {
-        clickMarker.setLatLng([lat, lon]);
-    } else {
-        clickMarker = L.circleMarker([lat, lon], {
-            radius: 7, color: '#e94560', fillColor: '#e94560',
-            fillOpacity: 0.8, weight: 2,
-        }).addTo(map);
-    }
-
-    // query API
     const panel = document.getElementById('query-panel');
     panel.innerHTML = '<span class="nodata">Loading...</span>';
 
     fetch(`${API}/api/query?lat=${lat}&lon=${lon}`)
         .then(r => r.json())
         .then(data => {
-            if (data.error) {
-                panel.innerHTML = `<span class="nodata">${data.error}</span>`;
-                return;
-            }
-
-            let html = `<div class="coord">${lat.toFixed(6)}°N, ${lon.toFixed(6)}°E</div>`;
-
-            for (const [key, info] of Object.entries(data)) {
+            if (data.error) { panel.innerHTML=`<span class="nodata">${data.error}</span>`; return; }
+            let html = `<div class="coord">📍 ${lat.toFixed(6)}°N, ${lon.toFixed(6)}°E</div>`;
+            for (const [key,info] of Object.entries(data)) {
                 if (['lat','lon','x_3826','y_3826'].includes(key)) continue;
-                if (!info || !info.name) continue;
-
-                if (info.value === null) {
-                    html += `<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
-                } else if (key === 'sediment_class') {
-                    const color = SED_COLORS[info.class_id] || '#888';
-                    html += `<div><span class="label">${info.name}:</span> `
-                         + `<span class="sed-chip" style="background:${color}">${info.value}</span></div>`;
-                } else {
-                    html += `<div><span class="label">${info.name}:</span> `
-                         + `<span class="value">${info.value} ${info.units}</span></div>`;
-                }
+                if (!info||!info.name) continue;
+                if (info.value===null) html+=`<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
+                else if (key==='sediment_class') {
+                    const c=SED_COLORS[info.class_id]||'#888';
+                    html+=`<div><span class="label">${info.name}:</span> <span class="sed-chip" style="background:${c}">${info.value}</span></div>`;
+                } else html+=`<div><span class="label">${info.name}:</span> <span class="value">${info.value} ${info.units}</span></div>`;
             }
             panel.innerHTML = html;
         })
-        .catch(err => {
-            panel.innerHTML = `<span class="nodata">Error: ${err.message}</span>`;
-        });
+        .catch(err => { panel.innerHTML=`<span class="nodata">Error</span>`; });
 });
 
 // ── Shift+Drag: region select ───────────────────────────────
-let selectStart = null;
-
 map.on('mousedown', (e) => {
     if (!e.originalEvent.shiftKey) return;
     selectStart = e.latlng;
     map.dragging.disable();
 });
-
 map.on('mousemove', (e) => {
     if (!selectStart) return;
     if (selectRect) map.removeLayer(selectRect);
-    selectRect = L.rectangle(
-        [selectStart, e.latlng],
-        { color: '#e94560', weight: 2, fillOpacity: 0.15 }
-    ).addTo(map);
+    selectRect = L.rectangle([selectStart, e.latlng],
+        {color:'#e94560', weight:2, fillOpacity:0.15, dashArray:'5,5'}).addTo(map);
 });
-
 map.on('mouseup', (e) => {
     if (!selectStart) return;
     map.dragging.enable();
-
     const bounds = L.latLngBounds(selectStart, e.latlng);
     selectStart = null;
-
     if (bounds.getNorthEast().equals(bounds.getSouthWest())) return;
 
-    // convert to EPSG:3826 (approximate via API)
-    const sw = bounds.getSouthWest();
-    const ne = bounds.getNorthEast();
-
-    // query stats
-    // we need to convert lat/lon to 3826 on server side
+    const sw=bounds.getSouthWest(), ne=bounds.getNorthEast();
     const panel = document.getElementById('stats-panel');
     panel.innerHTML = '<span class="nodata">Loading...</span>';
 
-    fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`)
-        .then(r => r.json())
-        .then(sw_data => {
-            fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`)
-                .then(r => r.json())
-                .then(ne_data => {
-                    const x0 = sw_data.x_3826, y0 = sw_data.y_3826;
-                    const x1 = ne_data.x_3826, y1 = ne_data.y_3826;
+    Promise.all([
+        fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`).then(r=>r.json()),
+        fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`).then(r=>r.json()),
+    ]).then(([sw_d, ne_d]) => {
+        return fetch(`${API}/api/stats?x0=${sw_d.x_3826}&y0=${sw_d.y_3826}&x1=${ne_d.x_3826}&y1=${ne_d.y_3826}`);
+    }).then(r=>r.json()).then(stats => {
+        let html = `<div style="color:#e94560;font-weight:bold;">📐 ${stats.width_m} × ${stats.height_m} m</div>`
+            +`<div style="font-size:11px;color:#888;">SW: ${stats.sw.lat}°N, ${stats.sw.lon}°E</div>`
+            +`<div style="font-size:11px;color:#888;">NE: ${stats.ne.lat}°N, ${stats.ne.lon}°E</div>`
+            +`<hr style="border-color:#333;margin:4px 0;">`;
+        for (const [key,info] of Object.entries(stats.layers)) {
+            if (info.value===null&&!info.dominant) html+=`<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
+            else if (info.dominant) html+=`<div><span class="label">${info.name}:</span> <span class="value">${info.dominant} (${info.purity}%)</span></div>`;
+            else html+=`<div><span class="label">${info.name}:</span> <span class="value">${info.min}~${info.max} ${info.units}, μ=${info.mean}</span></div>`;
+        }
+        panel.innerHTML = html;
+    }).catch(()=>{ panel.innerHTML='<span class="nodata">Error</span>'; });
 
-                    fetch(`${API}/api/stats?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`)
-                        .then(r => r.json())
-                        .then(stats => {
-                            let html = `<div style="color:#e94560;font-weight:bold;">`
-                                     + `${stats.width_m} × ${stats.height_m} m</div>`;
-                            html += `<div style="font-size:11px;color:#888;">`
-                                  + `SW: ${stats.sw.lat}°N, ${stats.sw.lon}°E<br>`
-                                  + `NE: ${stats.ne.lat}°N, ${stats.ne.lon}°E</div>`;
-
-                            for (const [key, info] of Object.entries(stats.layers)) {
-                                if (info.value === null && !info.dominant) {
-                                    html += `<div><span class="label">${info.name}:</span> <span class="nodata">—</span></div>`;
-                                } else if (info.dominant) {
-                                    html += `<div><span class="label">${info.name}:</span> `
-                                         + `<span class="value">${info.dominant} (${info.purity}%)</span></div>`;
-                                } else {
-                                    html += `<div><span class="label">${info.name}:</span> `
-                                         + `<span class="value">${info.min}~${info.max} ${info.units}, μ=${info.mean}</span></div>`;
-                                }
-                            }
-                            panel.innerHTML = html;
-                        });
-                });
-        })
-        .catch(err => {
-            panel.innerHTML = `<span class="nodata">Error: ${err.message}</span>`;
-        });
-
-    // zoom to selection
-    map.fitBounds(bounds, { padding: [20, 20] });
+    map.fitBounds(bounds, {padding:[30,30]});
 });
 
-// ── Keyboard shortcut: R to reset view ──────────────────────
+// ── Keyboard ────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'r' || e.key === 'R') {
-        if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
-        // reset to full extent
-        fetch(API + '/api/layers')
-            .then(r => r.json())
-            .then(data => {
-                if (data.bounds) {
-                    map.fitBounds(data.bounds);
-                }
-            });
+    if (e.key==='r'||e.key==='R') {
+        if (selectRect) { map.removeLayer(selectRect); selectRect=null; }
+        if (selectedTrackline) { 
+            tracklineLayer.resetStyle(selectedTrackline); 
+            selectedTrackline = null; 
+        }
+        fetch(API+'/api/layers').then(r=>r.json()).then(d=>{if(d.bounds)map.fitBounds(d.bounds);});
     }
 });
 </script>
