@@ -5,6 +5,7 @@ Generate terrain analysis figures for the report.
   2. VRM - Vector Ruggedness Measure (inferno)
   3. MBES Coverage / Confidence (binary valid mask)
 """
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,8 +14,7 @@ import numpy as np
 import rasterio
 from pyproj import Transformer
 
-
-ROOT    = Path(__file__).parent.parent.parent
+ROOT = Path(__file__).parent.parent.parent
 DEM_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
 VRM_TIF = ROOT / "outputs/tif/mbes_vrm.tif"
 OUT_DIR = ROOT / "outputs/figures"
@@ -86,20 +86,18 @@ def main():
     fig1, ax1 = plt.subplots(figsize=(10, 8))
 
     # filled background
-    im = ax1.imshow(dem, extent=extent, origin="upper", cmap="turbo_r",
-                    aspect="equal")
+    im = ax1.imshow(dem, extent=extent, origin="upper", cmap="turbo_r", aspect="equal")
     cb = plt.colorbar(im, ax=ax1, shrink=0.75, pad=0.02)
     cb.set_label("Depth (m, positive down)", fontsize=10)
 
     # contour lines
     dem_smooth = np.where(np.isfinite(dem), dem, np.nan)
     levels = np.arange(
-        np.floor(np.nanmin(dem) / 5) * 5,
-        np.ceil(np.nanmax(dem) / 5) * 5 + 1,
-        5
+        np.floor(np.nanmin(dem) / 5) * 5, np.ceil(np.nanmax(dem) / 5) * 5 + 1, 5
     )
-    cs = ax1.contour(X, Y, dem_smooth, levels=levels,
-                     colors="black", linewidths=0.6, alpha=0.7)
+    cs = ax1.contour(
+        X, Y, dem_smooth, levels=levels, colors="black", linewidths=0.6, alpha=0.7
+    )
     ax1.clabel(cs, fmt="%d m", fontsize=7, inline=True)
 
     ax1.set_title("Mudan Reservoir — Bathymetry", fontsize=13)
@@ -112,8 +110,15 @@ def main():
     # ── Figure 2: VRM ─────────────────────────────────────────
     fig2, ax2 = plt.subplots(figsize=(10, 8))
 
-    im = ax2.imshow(vrm, extent=extent, origin="upper", cmap="viridis",
-                    vmin=0, vmax=0.1, aspect="equal")
+    im = ax2.imshow(
+        vrm,
+        extent=extent,
+        origin="upper",
+        cmap="viridis",
+        vmin=0,
+        vmax=0.1,
+        aspect="equal",
+    )
     cb = plt.colorbar(im, ax=ax2, shrink=0.75, pad=0.02)
     cb.set_label("VRM", fontsize=10)
 

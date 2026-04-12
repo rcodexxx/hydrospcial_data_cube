@@ -13,12 +13,14 @@ dB convention: 10 * log10(amplitude)
   No REFERENCE_DN normalization — angular correction uses difference
   operations, so absolute offset cancels out.
 """
+
 import warnings
+
 import numpy as np
 from numpy.exceptions import RankWarning
+from scipy.ndimage import uniform_filter1d
 from scipy.signal import medfilt
 from sklearn.cluster import KMeans
-from scipy.ndimage import uniform_filter1d
 
 from src.config import REFERENCE_ANGLE
 
@@ -37,7 +39,7 @@ def _build_features(bs_db, inc_angle):
     """
     bins = np.arange(0, 91, 1)
     delta_db = np.zeros_like(bs_db, dtype=np.float32)
-    
+
     for i in range(len(bins) - 1):
         mask = (inc_angle >= bins[i]) & (inc_angle < bins[i + 1]) & np.isfinite(bs_db)
         if mask.sum() < 2:
@@ -53,9 +55,9 @@ def collect_features(bs_linear, inc_angle, sample_ratio=0.01):
     """Sample and build features for k-means training with outlier rejection."""
     bs_db = _to_db(bs_linear)
 
-    idx = np.random.choice(len(bs_db),
-                           max(1, int(len(bs_db) * sample_ratio)),
-                           replace=False)
+    idx = np.random.choice(
+        len(bs_db), max(1, int(len(bs_db) * sample_ratio)), replace=False
+    )
 
     bs_sample = bs_db[idx]
     inc_sample = inc_angle[idx]
@@ -70,8 +72,7 @@ def collect_features(bs_linear, inc_angle, sample_ratio=0.01):
 def fit_kmeans(feature_list, n_clusters=7):
     """Fit k-means on collected angular response features."""
     all_feat = np.concatenate(feature_list, axis=0)
-    km = KMeans(n_clusters=n_clusters, init="k-means++",
-                n_init=10, random_state=0)
+    km = KMeans(n_clusters=n_clusters, init="k-means++", n_init=10, random_state=0)
     km.fit(all_feat)
     return km
 
@@ -96,8 +97,9 @@ def _polyfit_with_rejection(x, y, deg, n_iter=2, sigma_thresh=2.0):
     return coeffs
 
 
-def angle_correction(bs_linear, inc_angle, km, n_clusters=7,
-                     nadir_cutoff=10.0, poly_deg=3):
+def angle_correction(
+    bs_linear, inc_angle, km, n_clusters=7, nadir_cutoff=10.0, poly_deg=3
+):
     """
     Apply angular correction using k-means clusters and polynomial fitting.
 
@@ -142,7 +144,9 @@ def angle_correction(bs_linear, inc_angle, km, n_clusters=7,
 
         # interpolate to get correction for each sample
         bs0 = np.interp(REFERENCE_ANGLE, bin_centers[valid_curve], curve[valid_curve])
-        correction = np.interp(inc_angle[mask], bin_centers[valid_curve], curve[valid_curve])
+        correction = np.interp(
+            inc_angle[mask], bin_centers[valid_curve], curve[valid_curve]
+        )
         bs_corr[mask] = bs_raw[mask] - correction + bs0
 
     bs_corr[inc_angle < nadir_cutoff] = np.nan
@@ -151,8 +155,7 @@ def angle_correction(bs_linear, inc_angle, km, n_clusters=7,
     valid_corr = bs_corr[np.isfinite(bs_corr)]
     if len(valid_corr) > 0:
         q01, q99 = np.percentile(valid_corr, [1, 99])
-        bs_corr = np.where(np.isfinite(bs_corr),
-                           np.clip(bs_corr, q01, q99), np.nan)
+        bs_corr = np.where(np.isfinite(bs_corr), np.clip(bs_corr, q01, q99), np.nan)
 
     return bs_corr, bs_raw, labels
 

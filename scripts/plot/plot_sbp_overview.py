@@ -6,6 +6,7 @@ Generate sub-bottom layer figures for the report.
   3. Sediment Classification (Hamilton)
   4. Isopach - Sediment Thickness (m)
 """
+
 from pathlib import Path
 
 import matplotlib.colors as mcolors
@@ -14,15 +15,16 @@ import matplotlib.ticker as mticker
 import numpy as np
 import rasterio
 from pyproj import Transformer
+
 from src.sbp.calculation import SEDIMENT_LABELS
 
-ROOT      = Path(__file__).parent.parent.parent
-MBES_TIF  = ROOT / "outputs/tif/mbes_bathymetry.tif"
-Z_TIF     = ROOT / "outputs/tif/sbp_impedance.tif"
-PW_TIF    = ROOT / "outputs/tif/sbp_pulse_width.tif"
-SED_TIF   = ROOT / "outputs/tif/sbp_sediment_class.tif"
+ROOT = Path(__file__).parent.parent.parent
+MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
+Z_TIF = ROOT / "outputs/tif/sbp_impedance.tif"
+PW_TIF = ROOT / "outputs/tif/sbp_pulse_width.tif"
+SED_TIF = ROOT / "outputs/tif/sbp_sediment_class.tif"
 THICK_TIF = ROOT / "outputs/tif/sbp_isopach.tif"
-OUT_DIR   = ROOT / "outputs/figures"
+OUT_DIR = ROOT / "outputs/figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CUT_NORTH = 2449050
@@ -89,20 +91,22 @@ def setup_ax(ax, bounds, crs):
 
 def main():
     dem, bounds, crs = read_masked(MBES_TIF)
-    z, _, _     = read_masked(Z_TIF, nodata=-9999.0)
-    pw, _, _    = read_masked(PW_TIF, nodata=-9999.0)
-    sed, _, _   = read_masked(SED_TIF, nodata=-1)
+    z, _, _ = read_masked(Z_TIF, nodata=-9999.0)
+    pw, _, _ = read_masked(PW_TIF, nodata=-9999.0)
+    sed, _, _ = read_masked(SED_TIF, nodata=-1)
     thick, _, _ = read_masked(THICK_TIF, nodata=-9999.0)
 
     # apply cut and DEM mask to all layers
     dem_cut = dem.copy()
-    cut_row = int((bounds.top - CUT_NORTH) / ((bounds.top - bounds.bottom) / dem.shape[0]))
+    cut_row = int(
+        (bounds.top - CUT_NORTH) / ((bounds.top - bounds.bottom) / dem.shape[0])
+    )
     if cut_row > 0:
         dem_cut[:cut_row, :] = np.nan
 
-    z     = apply_cut_and_mask(z, dem_cut, bounds)
-    pw    = apply_cut_and_mask(pw, dem_cut, bounds)
-    sed   = apply_cut_and_mask(sed, dem_cut, bounds)
+    z = apply_cut_and_mask(z, dem_cut, bounds)
+    pw = apply_cut_and_mask(pw, dem_cut, bounds)
+    sed = apply_cut_and_mask(sed, dem_cut, bounds)
     thick = apply_cut_and_mask(thick, dem_cut, bounds)
 
     extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
@@ -164,8 +168,15 @@ def main():
     thick = thick
     t_lo, t_hi = np.nanpercentile(thick[np.isfinite(thick)], [2, 98])
 
-    im = ax4.imshow(thick, extent=extent, origin="upper", cmap="turbo",
-                    vmin=t_lo, vmax=t_hi, aspect="equal")
+    im = ax4.imshow(
+        thick,
+        extent=extent,
+        origin="upper",
+        cmap="turbo",
+        vmin=t_lo,
+        vmax=t_hi,
+        aspect="equal",
+    )
 
     ax4.set_facecolor("#cccccc")
     cb = plt.colorbar(im, ax=ax4, shrink=0.75, pad=0.02)

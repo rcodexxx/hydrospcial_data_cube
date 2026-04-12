@@ -1,10 +1,11 @@
 # scripts/plot/plot_backscatter.py
 from pathlib import Path
-import numpy as np
-import rasterio
+
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-import matplotlib.colors as mcolors
+import numpy as np
+import rasterio
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyproj import Transformer
 from skimage import exposure
@@ -96,9 +97,15 @@ def render_plot(data, bounds, tr, out_path, title, plot_type="bs"):
         plot_vmin, plot_vmax = vmin, vmax
         cbar_label = "Backscatter Strength (dB)"
 
-    im = ax.imshow(plot_data, cmap=cmap, origin="upper",
-                   aspect="equal", extent=extent,
-                   vmin=plot_vmin, vmax=plot_vmax)
+    im = ax.imshow(
+        plot_data,
+        cmap=cmap,
+        origin="upper",
+        aspect="equal",
+        extent=extent,
+        vmin=plot_vmin,
+        vmax=plot_vmax,
+    )
 
     div = make_axes_locatable(ax)
     cax = div.append_axes("right", size="4%", pad=0.05)
@@ -109,11 +116,11 @@ def render_plot(data, bounds, tr, out_path, title, plot_type="bs"):
     else:
         cbar = plt.colorbar(im, cax=cax, label=cbar_label)
 
-    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_title(title, fontsize=14, fontweight="bold")
     setup_ax(ax, bounds, tr)
     plt.tight_layout()
 
-    plt.savefig(out_path, dpi=300, bbox_inches="tight", facecolor='white')
+    plt.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved: {out_path}")
 
@@ -131,21 +138,39 @@ def main():
     # 1. 輸出影像圖 (Imagery)
     img_data, _, _ = load_tif(IMG_TIF, nodata=-9999.0)
     img_data = np.where(mask, img_data, np.nan)
-    render_plot(img_data, bounds, tr, OUT_IMG_FIG,
-                "Mudan Reservoir - SSS Imagery", plot_type="imagery")
+    render_plot(
+        img_data,
+        bounds,
+        tr,
+        OUT_IMG_FIG,
+        "Mudan Reservoir - SSS Imagery",
+        plot_type="imagery",
+    )
 
     # 2. 輸出背向散射數值圖 (BS)
     bs_data, _, _ = load_tif(BS_TIF, nodata=-9999.0)
     bs_data = np.where(mask, bs_data, np.nan)
-    render_plot(bs_data, bounds, tr, OUT_BS_FIG,
-                "Mudan Reservoir - SSS Backscatter", plot_type="bs")
+    render_plot(
+        bs_data,
+        bounds,
+        tr,
+        OUT_BS_FIG,
+        "Mudan Reservoir - SSS Backscatter",
+        plot_type="bs",
+    )
 
     # 3. 輸出 K-means 分類分佈圖 (Clusters)
     # 注意：Cluster 的 nodata 是 255
     lbl_data, _, _ = load_tif(LBL_TIF, nodata=255)
     lbl_data = np.where(mask, lbl_data, np.nan)
-    render_plot(lbl_data, bounds, tr, OUT_LBL_FIG,
-                "Mudan Reservoir - Acoustic Facies (K-means)", plot_type="cluster")
+    render_plot(
+        lbl_data,
+        bounds,
+        tr,
+        OUT_LBL_FIG,
+        "Mudan Reservoir - Acoustic Facies (K-means)",
+        plot_type="cluster",
+    )
 
 
 if __name__ == "__main__":

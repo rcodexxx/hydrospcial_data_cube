@@ -12,16 +12,18 @@ Endpoints:
     GET /api/layers            → available tile layers
     GET /api/tracklines        → survey tracklines GeoJSON
 """
+
 import json
-import numpy as np
-import xarray as xr
 from pathlib import Path
-from pyproj import Transformer
+
+import numpy as np
+import uvicorn
+import xarray as xr
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from localtileserver import TileClient
-import uvicorn
+from pyproj import Transformer
 
 # ── Config ───────────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent
@@ -34,18 +36,26 @@ from_ll = Transformer.from_crs("EPSG:4326", "EPSG:3826", always_xy=True)
 to_ll = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
 
 SEDIMENT_LABELS = [
-    "Coarse sand", "Fine sand", "Very fine sand", "Silty sand",
-    "Sandy silt", "Silt", "Sandy-silt-clay", "Silty clay",
-    "Clayey silt", "Framework-supported mud", "Fluid mud",
+    "Coarse sand",
+    "Fine sand",
+    "Very fine sand",
+    "Silty sand",
+    "Sandy silt",
+    "Silt",
+    "Sandy-silt-clay",
+    "Silty clay",
+    "Clayey silt",
+    "Framework-supported mud",
+    "Fluid mud",
 ]
 
 # ── Layer definitions ────────────────────────────────────────
 TILE_LAYERS = {
-    "bathymetry":     {"tif": "mbes_bathymetry.tif",     "label": "Bathymetry"},
-    "imagery_lf":     {"tif": "sss_imagery_lf.tif",      "label": "SSS Imagery LF"},
-    "imagery_hf":     {"tif": "sss_imagery_hf.tif",      "label": "SSS Imagery HF"},
-    "sediment_class": {"tif": "sbp_sediment_class.tif",   "label": "Sediment Class"},
-    "mag_residual":   {"tif": "mag_residual.tif",         "label": "Magnetic Residual"},
+    "bathymetry": {"tif": "mbes_bathymetry.tif", "label": "Bathymetry"},
+    "imagery_lf": {"tif": "sss_imagery_lf.tif", "label": "SSS Imagery LF"},
+    "imagery_hf": {"tif": "sss_imagery_hf.tif", "label": "SSS Imagery HF"},
+    "sediment_class": {"tif": "sbp_sediment_class.tif", "label": "Sediment Class"},
+    "mag_residual": {"tif": "mag_residual.tif", "label": "Magnetic Residual"},
 }
 
 # ── Load NC ──────────────────────────────────────────────────
@@ -113,8 +123,12 @@ async def get_layers():
 async def query_point(lat: float, lon: float):
     x, y = from_ll.transform(lon, lat)
 
-    if (x < ds.x.values.min() or x > ds.x.values.max() or
-        y < ds.y.values.min() or y > ds.y.values.max()):
+    if (
+        x < ds.x.values.min()
+        or x > ds.x.values.max()
+        or y < ds.y.values.min()
+        or y > ds.y.values.max()
+    ):
         return {"error": "Outside data bounds"}
 
     xi = int(np.argmin(np.abs(ds.x.values - x)))
@@ -135,8 +149,17 @@ async def query_point(lat: float, lon: float):
             result[var] = {"name": long_name, "value": None, "units": units}
         elif var == "sediment_class":
             idx = int(val)
-            label = SEDIMENT_LABELS[idx] if 0 <= idx < len(SEDIMENT_LABELS) else f"class {idx}"
-            result[var] = {"name": long_name, "value": label, "units": "", "class_id": idx}
+            label = (
+                SEDIMENT_LABELS[idx]
+                if 0 <= idx < len(SEDIMENT_LABELS)
+                else f"class {idx}"
+            )
+            result[var] = {
+                "name": long_name,
+                "value": label,
+                "units": "",
+                "class_id": idx,
+            }
         else:
             result[var] = {"name": long_name, "value": round(val, 4), "units": units}
 
@@ -176,14 +199,21 @@ async def region_stats(x0: float, y0: float, x1: float, y1: float):
         if var == "sediment_class":
             classes, counts = np.unique(valid.astype(int), return_counts=True)
             dominant = int(classes[np.argmax(counts)])
-            label = SEDIMENT_LABELS[dominant] if 0 <= dominant < len(SEDIMENT_LABELS) else f"class {dominant}"
+            label = (
+                SEDIMENT_LABELS[dominant]
+                if 0 <= dominant < len(SEDIMENT_LABELS)
+                else f"class {dominant}"
+            )
             pct = round(100 * counts.max() / counts.sum(), 1)
             result["layers"][var] = {
-                "name": long_name, "dominant": label, "purity": pct,
+                "name": long_name,
+                "dominant": label,
+                "purity": pct,
             }
         else:
             result["layers"][var] = {
-                "name": long_name, "units": units,
+                "name": long_name,
+                "units": units,
                 "min": round(float(valid.min()), 4),
                 "max": round(float(valid.max()), 4),
                 "mean": round(float(valid.mean()), 4),

@@ -5,6 +5,7 @@ Global and site-specific configuration parameters for the Hydrospatial Data Cube
 Note: Environmental parameters (e.g., SOUND_SPEED) should be updated for each survey site
 based on the local Sound Velocity Profile (SVP) cast.
 """
+
 from pathlib import Path
 
 # ==========================================
@@ -33,8 +34,10 @@ RESOLUTION = 0.5
 SOUND_SPEED = 1489.073
 
 # Water properties for acoustic absorption and Time-Variable Gain (TVG) calculations
-WATER_TEMP_C = 25.0    # Water temperature in Celsius (default if unmeasured)
-WATER_SALINITY = 0.0   # Salinity in parts per thousand (ppt). 0 = freshwater, ~35 = seawater
+WATER_TEMP_C = 25.0  # Water temperature in Celsius (default if unmeasured)
+WATER_SALINITY = (
+    0.0  # Salinity in parts per thousand (ppt). 0 = freshwater, ~35 = seawater
+)
 
 
 # ==========================================
@@ -42,7 +45,7 @@ WATER_SALINITY = 0.0   # Salinity in parts per thousand (ppt). 0 = freshwater, ~
 # ==========================================
 # Sub-Bottom Profiler (SBP) Calibration Constant
 # Used for absolute/relative reflection coefficient or specific radiometric conversions.
-SBP_CC = 1.642613e+08
+SBP_CC = 1.642613e08
 
 # Side Scan Sonar (SSS) Reference Digital Number (Pseudo-Calibration)
 # Represents the theoretical maximum of the 16-bit unsigned integer ADC (2^16).

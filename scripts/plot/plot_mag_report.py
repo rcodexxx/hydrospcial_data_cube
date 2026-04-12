@@ -4,6 +4,7 @@ Generate magnetometer figures for the report.
   1. Magnetic Background (large-scale geological trend)
   2. Magnetic Residual (local anomalies for UCH detection)
 """
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -12,11 +13,11 @@ import numpy as np
 import rasterio
 from pyproj import Transformer
 
-ROOT     = Path(__file__).parent.parent.parent
+ROOT = Path(__file__).parent.parent.parent
 MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-BG_TIF   = ROOT / "outputs/tif/mag_background.tif"
-RES_TIF  = ROOT / "outputs/tif/mag_residual.tif"
-OUT_DIR  = ROOT / "outputs/figures"
+BG_TIF = ROOT / "outputs/tif/mag_background.tif"
+RES_TIF = ROOT / "outputs/tif/mag_residual.tif"
+OUT_DIR = ROOT / "outputs/figures"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CUT_NORTH = 2449050
@@ -69,16 +70,18 @@ def setup_ax(ax, bounds, crs):
 
 def main():
     dem, bounds, crs = read_masked(MBES_TIF)
-    bg, _, _    = read_masked(BG_TIF, nodata=-9999.0)
+    bg, _, _ = read_masked(BG_TIF, nodata=-9999.0)
     resid, _, _ = read_masked(RES_TIF, nodata=-9999.0)
 
     # apply cut
     dem_cut = dem.copy()
-    cut_row = int((bounds.top - CUT_NORTH) / ((bounds.top - bounds.bottom) / dem.shape[0]))
+    cut_row = int(
+        (bounds.top - CUT_NORTH) / ((bounds.top - bounds.bottom) / dem.shape[0])
+    )
     if cut_row > 0:
         dem_cut[:cut_row, :] = np.nan
 
-    bg    = apply_cut_and_mask(bg, dem_cut, bounds)
+    bg = apply_cut_and_mask(bg, dem_cut, bounds)
     resid = apply_cut_and_mask(resid, dem_cut, bounds)
 
     extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
@@ -90,8 +93,15 @@ def main():
     bg_abs = float(np.nanpercentile(np.abs(bg_valid), 98))
     vmax_bg = np.ceil(bg_abs / 5) * 5
 
-    im = ax1.imshow(bg, extent=extent, origin="upper", cmap="RdBu_r",
-                    vmin=-vmax_bg, vmax=vmax_bg, aspect="equal")
+    im = ax1.imshow(
+        bg,
+        extent=extent,
+        origin="upper",
+        cmap="RdBu_r",
+        vmin=-vmax_bg,
+        vmax=vmax_bg,
+        aspect="equal",
+    )
     ax1.set_facecolor("#cccccc")
     cb = plt.colorbar(im, ax=ax1, shrink=0.75, pad=0.02)
     cb.set_label("Magnetic Background (nT)", fontsize=10)
@@ -108,8 +118,15 @@ def main():
     res_abs = float(np.nanpercentile(np.abs(res_valid), 98))
     vmax_res = np.ceil(res_abs / 5) * 5
 
-    im = ax2.imshow(resid, extent=extent, origin="upper", cmap="RdBu_r",
-                    vmin=-vmax_res, vmax=vmax_res, aspect="equal")
+    im = ax2.imshow(
+        resid,
+        extent=extent,
+        origin="upper",
+        cmap="RdBu_r",
+        vmin=-vmax_res,
+        vmax=vmax_res,
+        aspect="equal",
+    )
     ax2.set_facecolor("#cccccc")
     cb = plt.colorbar(im, ax=ax2, shrink=0.75, pad=0.02)
     cb.set_label("Magnetic Residual (nT)", fontsize=10)
@@ -122,10 +139,14 @@ def main():
     plt.show()
 
     # stats
-    print(f"\nBackground: {bg_valid.min():.1f} ~ {bg_valid.max():.1f} nT, "
-          f"std={bg_valid.std():.1f} nT")
-    print(f"Residual:   {res_valid.min():.1f} ~ {res_valid.max():.1f} nT, "
-          f"std={res_valid.std():.1f} nT")
+    print(
+        f"\nBackground: {bg_valid.min():.1f} ~ {bg_valid.max():.1f} nT, "
+        f"std={bg_valid.std():.1f} nT"
+    )
+    print(
+        f"Residual:   {res_valid.min():.1f} ~ {res_valid.max():.1f} nT, "
+        f"std={res_valid.std():.1f} nT"
+    )
 
 
 if __name__ == "__main__":

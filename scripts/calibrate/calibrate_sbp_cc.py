@@ -20,24 +20,27 @@ Methodology:
 Reference:
   Huang & Liu (2015) Eq.(6): CC = (r1*A1)^2 / (r2*A2)
 """
+
 from pathlib import Path
+
 import numpy as np
 import rasterio
 from pyproj import Transformer
+
 from src.data_loader.read_sbp_jsf import read_sbp_jsf
 from src.sbp.calculation import estimate_cc
 
-ROOT     = Path(__file__).parent.parent.parent
+ROOT = Path(__file__).parent.parent.parent
 SBP_PATH = ROOT / "data/sbp"
 MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-VRM_TIF  = ROOT / "outputs/tif/mbes_vrm.tif"
+VRM_TIF = ROOT / "outputs/tif/mbes_vrm.tif"
 
 # selection criteria
-MIN_CONSEC      = 30    # minimum consecutive good pings
-VRM_THRESH      = 0.002 # maximum VRM (low = flat)
+MIN_CONSEC = 30  # minimum consecutive good pings
+VRM_THRESH = 0.002  # maximum VRM (low = flat)
 DEPTH_STD_THRESH = 0.5  # maximum depth std within segment (m)
-MIN_CC_COUNT    = 10    # minimum valid CC estimates per segment
-TOP_N_SEGMENTS  = 3     # number of best segments to combine
+MIN_CC_COUNT = 10  # minimum valid CC estimates per segment
+TOP_N_SEGMENTS = 3  # number of best segments to combine
 
 
 def sample_raster(tif_path, xs, ys):
@@ -105,8 +108,8 @@ def main():
         if length < MIN_CONSEC:
             continue
 
-        seg_depth = depth[start:start + length]
-        seg_vrm = vrm[start:start + length]
+        seg_depth = depth[start : start + length]
+        seg_vrm = vrm[start : start + length]
         depth_std = np.nanstd(seg_depth)
 
         if depth_std > DEPTH_STD_THRESH:
@@ -134,18 +137,20 @@ def main():
 
         cv = clean.std() / clean.mean() * 100
 
-        candidates.append({
-            "file": jsf.name,
-            "start": start,
-            "length": length,
-            "depth_mean": float(np.nanmean(seg_depth)),
-            "depth_std": depth_std,
-            "vrm_mean": float(np.nanmean(seg_vrm)),
-            "cc_median": float(np.median(clean)),
-            "cc_cv": cv,
-            "cc_count": len(clean),
-            "cc_values": clean,
-        })
+        candidates.append(
+            {
+                "file": jsf.name,
+                "start": start,
+                "length": length,
+                "depth_mean": float(np.nanmean(seg_depth)),
+                "depth_std": depth_std,
+                "vrm_mean": float(np.nanmean(seg_vrm)),
+                "cc_median": float(np.median(clean)),
+                "cc_cv": cv,
+                "cc_count": len(clean),
+                "cc_values": clean,
+            }
+        )
 
     if not candidates:
         print("ERROR: No valid calibration segments found.")
@@ -157,18 +162,22 @@ def main():
 
     # print all candidates
     print(f"Found {len(candidates)} candidate segments (sorted by stability):\n")
-    print(f"{'#':>2s} {'File':<28s} {'Ping':>5s} {'Len':>4s} "
-          f"{'Depth':>6s} {'D_std':>5s} {'VRM':>8s} "
-          f"{'CC_dB':>7s} {'CV%':>6s} {'N':>4s}")
+    print(
+        f"{'#':>2s} {'File':<28s} {'Ping':>5s} {'Len':>4s} "
+        f"{'Depth':>6s} {'D_std':>5s} {'VRM':>8s} "
+        f"{'CC_dB':>7s} {'CV%':>6s} {'N':>4s}"
+    )
     print("-" * 90)
 
     for i, c in enumerate(candidates):
         marker = " <--" if i < TOP_N_SEGMENTS else ""
-        print(f"{i+1:2d} {c['file']:<28s} {c['start']:5d} {c['length']:4d} "
-              f"{c['depth_mean']:6.1f} {c['depth_std']:5.2f} "
-              f"{c['vrm_mean']:8.5f} "
-              f"{20*np.log10(c['cc_median']):7.1f} {c['cc_cv']:6.1f} "
-              f"{c['cc_count']:4d}{marker}")
+        print(
+            f"{i+1:2d} {c['file']:<28s} {c['start']:5d} {c['length']:4d} "
+            f"{c['depth_mean']:6.1f} {c['depth_std']:5.2f} "
+            f"{c['vrm_mean']:8.5f} "
+            f"{20*np.log10(c['cc_median']):7.1f} {c['cc_cv']:6.1f} "
+            f"{c['cc_count']:4d}{marker}"
+        )
 
     # combine top segments
     # collect all CC_dB values
@@ -179,8 +188,11 @@ def main():
     mad = np.median(np.abs(all_cc_db - median_db))
     threshold = 3.0 * mad  # ~2 sigma equivalent
 
-    consistent = [c for c, db in zip(candidates, all_cc_db)
-                  if abs(db - median_db) <= max(threshold, 3.0)]
+    consistent = [
+        c
+        for c, db in zip(candidates, all_cc_db)
+        if abs(db - median_db) <= max(threshold, 3.0)
+    ]
 
     if not consistent:
         print("WARNING: No consistent segments found, using all.")
@@ -190,8 +202,10 @@ def main():
     consistent.sort(key=lambda c: c["cc_cv"])
     top = consistent[:TOP_N_SEGMENTS]
 
-    print(f"\nCC clustering: median={median_db:.1f} dB, MAD={mad:.1f} dB, "
-          f"threshold=±{max(threshold, 3.0):.1f} dB")
+    print(
+        f"\nCC clustering: median={median_db:.1f} dB, MAD={mad:.1f} dB, "
+        f"threshold=±{max(threshold, 3.0):.1f} dB"
+    )
     print(f"Consistent segments: {len(consistent)} / {len(candidates)}")
 
     all_cc = np.concatenate([c["cc_values"] for c in top])
@@ -208,8 +222,10 @@ def main():
     print(f"  Combined CV= {combined_cv:.1f}%")
     print(f"\n  Sources:")
     for c in top:
-        print(f"    {c['file']} (ping {c['start']}-{c['start']+c['length']}, "
-              f"depth={c['depth_mean']:.1f}m, CV={c['cc_cv']:.1f}%)")
+        print(
+            f"    {c['file']} (ping {c['start']}-{c['start']+c['length']}, "
+            f"depth={c['depth_mean']:.1f}m, CV={c['cc_cv']:.1f}%)"
+        )
 
     print(f"\n  Add to src/config.py:")
     print(f"  SBP_CC = {final_cc:.6e}")
