@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hydrospatial Data Cube</title>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.css"
+    />
+    <script src="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+
+    <style>
+      input[type="range"] {
+        accent-color: #f57d15;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f8fafc;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+      .leaflet-popup-content-wrapper {
+        border-radius: 8px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+      }
+      .leaflet-popup-content {
+        margin: 12px;
+      }
+      /* 防止拖曳時反白文字 */
+      .no-select {
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+  </head>
+  <body
+    class="h-screen w-screen overflow-hidden bg-slate-50 text-slate-800 font-sans relative flex"
+  >
+    <button
+      id="btn-toggle-sidebar"
+      class="absolute top-4 left-4 z-[2000] bg-white border border-slate-200 p-2 rounded shadow-md text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+    >
+      <svg
+        class="w-5 h-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M4 6h16M4 12h16M4 18h16"
+        ></path>
+      </svg>
+    </button>
+
+    <div
+      id="sidebar"
+      class="absolute top-0 left-0 bottom-0 w-[320px] flex flex-col bg-white border-r border-slate-200 shadow-xl z-[1500] transition-transform duration-300 transform translate-x-0"
+    >
+      <div class="p-5 pl-14 border-b border-slate-100 bg-slate-50">
+        <h1 class="text-lg font-bold tracking-tight text-slate-900 mb-2">
+          Hydrospatial Cube
+        </h1>
+        <select
+          class="w-full bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-md p-2 shadow-sm outline-none"
+        >
+          <option value="mudan">Mudan Reservoir Survey</option>
+        </select>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
+        <div>
+          <h2
+            class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3"
+          >
+            Data Layers
+          </h2>
+          <div class="flex flex-col gap-1">
+            <button
+              class="layer-btn active text-left px-3 py-2 text-sm rounded bg-blue-50 border-l-4 border-blue-600 text-blue-700 font-bold"
+              data-layer="bathymetry"
+            >
+              Bathymetry
+            </button>
+            <button
+              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              data-layer="imagery_lf"
+            >
+              SSS Imagery LF
+            </button>
+            <button
+              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              data-layer="imagery_hf"
+            >
+              SSS Imagery HF
+            </button>
+            <button
+              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              data-layer="sediment_class"
+            >
+              Sediment Class
+            </button>
+            <button
+              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              data-layer="mag_residual"
+            >
+              Magnetic Residual
+            </button>
+          </div>
+          <div
+            class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between"
+          >
+            <label class="text-xs font-semibold text-slate-500">Opacity</label>
+            <input
+              type="range"
+              id="opacity-slider"
+              class="w-2/3 cursor-pointer"
+              min="0"
+              max="100"
+              value="75"
+            />
+          </div>
+        </div>
+        <div>
+          <h2
+            class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3"
+          >
+            Display Settings
+          </h2>
+          <div class="space-y-3">
+            <label class="flex items-center gap-3 cursor-pointer"
+              ><input
+                type="checkbox"
+                id="chk-targets"
+                class="w-4 h-4 text-blue-600 rounded"
+                checked
+              /><span class="text-sm font-medium text-slate-700"
+                >Survey Targets</span
+              ></label
+            >
+            <label class="flex items-center gap-3 cursor-pointer"
+              ><input
+                type="checkbox"
+                id="chk-trackline-sss"
+                class="w-4 h-4 text-blue-600 rounded"
+              /><span class="text-sm font-medium text-slate-700"
+                >Tracklines (SSS)</span
+              ></label
+            >
+            <label class="flex items-center gap-3 cursor-pointer"
+              ><input
+                type="checkbox"
+                id="chk-trackline-sbp"
+                class="w-4 h-4 text-pink-600 rounded"
+              /><span class="text-sm font-medium text-slate-700"
+                >Tracklines (SBP)</span
+              ></label
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="map-wrapper"
+      class="absolute top-0 left-[320px] right-0 bottom-0 transition-all duration-300 ease-in-out bg-slate-100"
+    >
+      <div
+        class="absolute top-4 left-1/2 transform -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur border border-slate-200 p-1.5 rounded-lg shadow-lg flex gap-1 items-center"
+      >
+        <button
+          class="tool-btn active p-2 rounded hover:bg-slate-100 bg-blue-50 text-blue-600 shadow-sm"
+          data-tool="pan"
+          title="Pan"
+        >
+          🖐
+        </button>
+        <button
+          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
+          data-tool="query"
+          title="Point Query"
+        >
+          📍
+        </button>
+        <button
+          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
+          data-tool="line"
+          title="Profile Line"
+        >
+          ✏️
+        </button>
+        <button
+          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
+          data-tool="select"
+          title="Region Stats"
+        >
+          ⬜
+        </button>
+        <div class="w-px h-6 bg-slate-200 mx-1"></div>
+        <button
+          id="btn-reset"
+          class="p-2 rounded hover:bg-orange-50 hover:text-orange-600 text-slate-500 transition-colors"
+          title="Reset View"
+        >
+          🔄
+        </button>
+      </div>
+      <div id="map" class="w-full h-full z-10"></div>
+      <div
+        id="coord-display"
+        class="absolute bottom-4 left-4 z-[1000] bg-white/90 border border-slate-200 text-slate-800 text-xs px-3 py-1.5 rounded shadow pointer-events-none"
+      >
+        —
+      </div>
+    </div>
+
+    <div
+      id="bottom-panel"
+      class="absolute bottom-0 left-[320px] right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1800] flex flex-col transition-all duration-300 ease-in-out transform translate-y-full"
+      style="height: 0px"
+    >
+      <div
+        id="bp-resizer"
+        class="absolute top-0 left-0 right-0 h-1.5 cursor-row-resize bg-transparent hover:bg-blue-400 z-50 transition-colors"
+      ></div>
+
+      <div
+        class="flex justify-between items-center px-5 py-2 border-b border-slate-200 bg-slate-50 shrink-0"
+      >
+        <div class="flex items-center gap-3">
+          <span id="bp-title" class="font-bold text-slate-800 text-sm"
+            >Inspector</span
+          >
+          <span
+            id="bp-info-text"
+            class="text-xs font-mono text-orange-600 font-bold ml-4"
+          ></span>
+        </div>
+        <button
+          onclick="closePanels()"
+          class="text-slate-400 hover:text-red-500 transition-colors text-2xl leading-none px-2"
+        >
+          &times;
+        </button>
+      </div>
+
+      <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div
+          id="bp-top-section"
+          class="relative w-full shrink-0 flex flex-col pt-2"
+          style="height: 200px"
+        >
+          <div id="bp-echarts-container" class="flex-1 w-full"></div>
+          <div
+            id="bp-echarts-cursor"
+            class="absolute top-[30px] bottom-[20px] w-[2px] bg-orange-500 pointer-events-none hidden z-50"
+          ></div>
+          <input
+            type="range"
+            id="bp-slider"
+            class="w-[calc(100%-80px)] mx-[40px] mt-1 cursor-pointer z-50 shrink-0"
+            min="0"
+            max="100"
+            value="0"
+          />
+        </div>
+
+        <div
+          id="bp-internal-resizer"
+          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1 hidden"
+        ></div>
+
+        <div
+          id="bp-sbp-section"
+          class="w-full relative hidden flex-1 min-h-[100px] overflow-hidden pb-3"
+        >
+          <div
+            class="text-[11px] font-bold text-slate-400 mb-1 pl-[40px] shrink-0"
+          >
+            SBP Envelope Image
+          </div>
+          <div
+            class="relative w-[calc(100%-80px)] mx-[40px] h-[calc(100%-20px)] bg-black rounded shadow-sm overflow-hidden border border-slate-300"
+          >
+            <img
+              id="bp-sbp-image"
+              class="w-full h-full object-fill block"
+              src=""
+            />
+            <div
+              id="bp-sbp-cursor"
+              class="absolute top-0 bottom-0 w-[2px] bg-orange-500 pointer-events-none hidden z-50"
+            ></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="right-panel"
+      class="absolute top-0 right-0 bottom-0 bg-white border-l border-slate-200 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] z-[1900] flex flex-col transition-all duration-300 ease-in-out transform translate-x-full"
+      style="width: 0px"
+    >
+      <div
+        id="rp-resizer"
+        class="absolute top-0 bottom-0 left-0 w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400 z-50 transition-colors"
+      ></div>
+
+      <div
+        class="flex justify-between items-center px-5 py-3 border-b border-slate-200 bg-slate-50 shrink-0"
+      >
+        <span id="rp-title" class="font-bold text-slate-800 text-sm"
+          >SSS Viewer</span
+        >
+        <div
+          class="bg-slate-200 p-0.5 rounded flex gap-1 text-[11px] font-bold ml-4"
+        >
+          <button
+            id="tab-hf"
+            onclick="setSSSMode('hf')"
+            class="sss-tab px-2 py-1 rounded bg-white shadow-sm text-blue-600 transition-colors"
+          >
+            HF
+          </button>
+          <button
+            id="tab-lf"
+            onclick="setSSSMode('lf')"
+            class="sss-tab px-2 py-1 rounded text-slate-500 hover:text-slate-700 transition-colors"
+          >
+            LF
+          </button>
+          <button
+            id="tab-compare"
+            onclick="setSSSMode('compare')"
+            class="sss-tab px-2 py-1 rounded text-slate-500 hover:text-slate-700 transition-colors"
+          >
+            Compare
+          </button>
+        </div>
+        <div class="flex-1"></div>
+        <button
+          onclick="closePanels()"
+          class="text-slate-400 hover:text-red-500 transition-colors text-2xl leading-none px-2"
+        >
+          &times;
+        </button>
+      </div>
+
+      <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div
+          id="rp-top-section"
+          class="relative w-full shrink-0 flex flex-col px-4 pt-2"
+          style="height: 200px"
+        >
+          <div class="flex justify-between items-center mb-1 shrink-0">
+            <span
+              id="rp-info-text"
+              class="text-[11px] font-mono text-orange-600 font-bold"
+            ></span>
+          </div>
+          <div id="rp-echarts-container" class="flex-1 w-full relative"></div>
+          <div
+            id="rp-echarts-cursor"
+            class="absolute top-[30px] bottom-[20px] w-[2px] bg-orange-500 pointer-events-none hidden z-50 shadow-md"
+          ></div>
+          <input
+            type="range"
+            id="rp-slider"
+            class="w-[calc(100%-60px)] mx-[30px] mt-1 cursor-pointer relative z-50 shrink-0"
+            min="0"
+            max="100"
+            value="0"
+          />
+        </div>
+
+        <div
+          id="rp-internal-resizer"
+          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1"
+        ></div>
+
+        <div
+          id="rp-images"
+          class="flex-1 p-4 overflow-y-auto bg-slate-100 flex gap-4"
+        >
+          <div id="sss-hf-container" class="flex-1 relative hidden">
+            <div
+              class="absolute top-2 left-2 z-10 text-[10px] font-bold text-white bg-black/60 px-2 py-1 rounded"
+            >
+              HF (830 kHz)
+            </div>
+            <div
+              class="relative rounded shadow-sm bg-black overflow-hidden border border-slate-300"
+            >
+              <img id="img-hf" class="w-full h-auto block" src="" />
+              <div
+                class="wf-redline absolute left-0 right-0 h-[2px] bg-orange-500 top-0 pointer-events-none"
+              ></div>
+            </div>
+          </div>
+          <div id="sss-lf-container" class="flex-1 relative hidden">
+            <div
+              class="absolute top-2 left-2 z-10 text-[10px] font-bold text-white bg-black/60 px-2 py-1 rounded"
+            >
+              LF (225 kHz)
+            </div>
+            <div
+              class="relative rounded shadow-sm bg-black overflow-hidden border border-slate-300"
+            >
+              <img id="img-lf" class="w-full h-auto block" src="" />
+              <div
+                class="wf-redline absolute left-0 right-0 h-[2px] bg-orange-500 top-0 pointer-events-none"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

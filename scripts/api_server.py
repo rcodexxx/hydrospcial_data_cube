@@ -29,7 +29,7 @@ from pyproj import Transformer
 ROOT = Path(__file__).parent.parent
 NC_PATH = ROOT / "outputs" / "hydrospatial_datacube.nc"
 TIF_DIR = ROOT / "outputs" / "tif"
-VIEWER_DIR = ROOT / "viewer"
+VIEWER_DIR = ROOT / "src" / "viewer"
 TRACKLINES_PATH = ROOT / "outputs" / "tracklines.json"
 
 from_ll = Transformer.from_crs("EPSG:4326", "EPSG:3826", always_xy=True)
@@ -51,11 +51,31 @@ SEDIMENT_LABELS = [
 
 # ── Layer definitions ────────────────────────────────────────
 TILE_LAYERS = {
-    "bathymetry": {"tif": "mbes_bathymetry.tif", "label": "Bathymetry"},
-    "imagery_lf": {"tif": "sss_imagery_lf.tif", "label": "SSS Imagery LF"},
-    "imagery_hf": {"tif": "sss_imagery_hf.tif", "label": "SSS Imagery HF"},
-    "sediment_class": {"tif": "sbp_sediment_class.tif", "label": "Sediment Class"},
-    "mag_residual": {"tif": "mag_residual.tif", "label": "Magnetic Residual"},
+    "bathymetry": {
+        "tif": "mbes_bathymetry.tif", 
+        "label": "Bathymetry",
+        "palette": "turbo_r"
+    },
+    "imagery_lf": {
+        "tif": "sss_imagery_lf.tif", 
+        "label": "SSS Imagery LF",
+        "palette": "copper"
+    },
+    "imagery_hf": {
+        "tif": "sss_imagery_hf.tif", 
+        "label": "SSS Imagery HF",
+        "palette": "copper"
+    },
+        "sediment_class": {
+        "tif": "sbp_sediment_rgb.tif", 
+        "label": "Sediment Class",
+        "palette": None 
+    },
+    "mag_residual": {
+        "tif": "mag_residual.tif", 
+        "label": "Magnetic Residual",
+        "palette": "rdbu"
+    },
 }
 
 # ── Load NC ──────────────────────────────────────────────────
@@ -70,14 +90,28 @@ for key, cfg in TILE_LAYERS.items():
     tif_path = TIF_DIR / cfg["tif"]
     if tif_path.exists():
         client = TileClient(str(tif_path))
+        url_kwargs = {}
+        
+        if cfg.get("palette"):
+            url_kwargs["colormap"] = cfg["palette"]
+        else:
+            url_kwargs["vmin"] = 0
+            url_kwargs["vmax"] = 255
+        
+        native_nodata = client.dataset.nodata
+        if native_nodata is not None:
+            url_kwargs["nodata"] = native_nodata
+
+        colored_url = client.get_tile_url(**url_kwargs)
+        
         tile_clients[key] = {
             "client": client,
-            "url": client.get_tile_url(),
+            "url": colored_url, 
             "label": cfg["label"],
             "center": client.center(),
             "bounds": client.bounds(),
         }
-        print(f"  Tile: {key} → {client.get_tile_url()}")
+        print(f"  Tile: {key} → {colored_url}")
     else:
         print(f"  Skip: {tif_path} not found")
 
@@ -94,6 +128,9 @@ app = FastAPI(title="Hydrospatial Data Cube")
 
 # serve viewer HTML
 VIEWER_DIR.mkdir(exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=VIEWER_DIR), name="static")
+app.mount("/waterfalls", StaticFiles(directory=ROOT / "outputs" / "waterfalls"), name="waterfalls")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -227,6 +264,64 @@ async def get_tracklines():
     if TRACKLINES_PATH.exists():
         return JSONResponse(json.loads(TRACKLINES_PATH.read_text()))
     return {"type": "FeatureCollection", "features": []}
+
+
+@app.get("/api/waterfall-index")
+async def get_waterfall_index():
+    index_path = ROOT / "outputs" / "waterfalls" / "index.json"
+    if index_path.exists():
+        return JSONResponse(json.loads(index_path.read_text()))
+    return {"sss": {}, "sbp": {}}
+
+@app.get("/api/depth-profile")
+async def depth_profile(coords: str):
+    """Get depth along a series of coordinates.
+    coords format: lon1,lat1;lon2,lat2;...
+    """
+    points = coords.split(";")
+    depths = []
+    for pt in points:
+        try:
+            lon, lat = map(float, pt.split(","))
+            x, y = from_ll.transform(lon, lat)
+            xi = int(np.argmin(np.abs(ds.x.values - x)))
+            yi = int(np.argmin(np.abs(ds.y.values - y)))
+            val = float(ds["bathymetry"].values[yi, xi])
+            depths.append(round(val, 2) if not np.isnan(val) else None)
+        except:
+            depths.append(None)
+    return {"depths": depths}
+
+
+@app.get("/api/profile")
+async def profile(coords: str):
+    """Get depth, sediment, isopach along a series of coordinates.
+    coords format: lon1,lat1;lon2,lat2;...
+    """
+    points = coords.split(";")
+    result = {"depth": [], "sediment": [], "isopach": [], "rl": []}
+    
+    for pt in points:
+        try:
+            lon, lat = map(float, pt.split(","))
+            x, y = from_ll.transform(lon, lat)
+            xi = int(np.argmin(np.abs(ds.x.values - x)))
+            yi = int(np.argmin(np.abs(ds.y.values - y)))
+            
+            for var, key in [("bathymetry", "depth"), 
+                            ("sediment_class", "sediment"),
+                            ("isopach", "isopach"), 
+                            ("rl", "rl")]:
+                if var in ds.data_vars:
+                    val = float(ds[var].values[yi, xi])
+                    result[key].append(round(val, 4) if not np.isnan(val) else None)
+                else:
+                    result[key].append(None)
+        except:
+            for key in result:
+                result[key].append(None)
+    
+    return result
 
 
 # ── Run ──────────────────────────────────────────────────────

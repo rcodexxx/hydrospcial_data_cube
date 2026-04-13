@@ -19,7 +19,7 @@ import numpy as np
 import rasterio
 from pyproj import Transformer
 from rasterio.transform import from_origin
-from scipy.ndimage import uniform_filter1d
+from scipy.ndimage import uniform_filter1d, binary_erosion
 from tqdm import tqdm
 
 from src.backscatter.georef import georef_line
@@ -258,6 +258,13 @@ def main():
 
     out_lbl = acc.result_labels()
     out_lbl[dem_mask] = 255
+
+    valid_mask = (out_bs != -9999.0)
+    eroded_mask = binary_erosion(valid_mask, iterations=3)
+
+    out_bs[~eroded_mask] = -9999.0
+    out_img[~eroded_mask] = -9999.0
+    out_lbl[~eroded_mask] = 255
 
     # write backscatter
     with rasterio.open(OUT_BS_TIF, "w", driver="GTiff",
