@@ -3,35 +3,50 @@ Build isopach (sediment thickness) layer from SBP data using Acoustic Physical P
 
 Workflow:
   1. Extract acoustic envelope via Hilbert Transform.
-  2. Track Sub-Bottom Reflector (SBR) using Peak Prominence.
-  3. Filter out false Multiples (BS, BTB, BSB) using Sonar Draft geometry.
-  4. Compute physical thickness via Two-Way Travel Time (TWT).
-  5. Use Spatial Interpolation (griddata) to map thickness, bypassing ML regression
-     due to anthropogenic dredging disturbances.
+  2. Map spatial coordinates to Sediment Classification (Variable Sound Speed).
+  3. Track Sub-Bottom Reflector (SBR) using Peak Prominence & Local Sound Speed.
+  4. Filter out false Multiples (BS) using Sonar Draft geometry.
+  5. Compute physical thickness via Two-Way Travel Time (TWT) dynamically.
+  6. Use Spatial Interpolation (IDW) to map thickness.
 """
 from pathlib import Path
 import numpy as np
 import rasterio
 from pyproj import Transformer
 from scipy.signal import find_peaks, hilbert
-from scipy.interpolate import griddata
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from src.data_loader.read_sbp_jsf import read_sbp_jsf
-from src.config import SOUND_SPEED, EPSG
+from src.config import EPSG, SOUND_SPEED
 
 # ==========================================
 # 路徑與常數設定
 # ==========================================
-ROOT      = Path(__file__).parent.parent.parent
-SBP_PATH  = ROOT / "data/sbp"
-MBES_TIF  = ROOT / "outputs/tif/mbes_bathymetry.tif"
-OUT_THICK = ROOT / "outputs/tif/sbp_isopach.tif"
+ROOT        = Path(__file__).parent.parent.parent
+SBP_PATH    = ROOT / "data/sbp"
+MBES_TIF    = ROOT / "outputs/tif/mbes_bathymetry.tif"
+SED_TIF     = ROOT / "outputs/tif/sbp_sediment_class.tif"  # 新增：底質分類圖
+OUT_THICK   = ROOT / "outputs/tif/sbp_isopach.tif"
 
-NS        = 20480e-9
-SDEP      = NS * SOUND_SPEED / 2
-THICK_CLIP = (0.1, 3.0)  # 厚度合理範圍 (公尺)
-SONAR_DRAFT = 1.04       # 聲納吃水深度 (從測量報告取得，用於計算 BS 假訊號)
+NS          = 20480e-9
+THICK_CLIP  = (0.1, 3.0)  # 厚度合理範圍 (公尺)
+SONAR_DRAFT = 1.04        # 聲納吃水深度
+
+
+VP_DICT = {
+    0: SOUND_SPEED * 1.201,  # Coarse sand
+    1: SOUND_SPEED * 1.145,  # Fine sand
+    2: SOUND_SPEED * 1.115,  # Very fine sand
+    3: SOUND_SPEED * 1.078,  # Silty sand
+    4: SOUND_SPEED * 1.080,  # Sandy silt
+    5: SOUND_SPEED * 1.057,  # Silt
+    6: SOUND_SPEED * 1.033,  # Sandy-silt-clay
+    7: SOUND_SPEED * 1.014,  # Silty clay
+    8: SOUND_SPEED * 0.994,  # Clayey silt
+    9: SOUND_SPEED * 1.000,  # Framework-supported mud
+    10: SOUND_SPEED * 0.9, # Fluid mud
+}
 
 # ==========================================
 # 聲學處理函數
@@ -40,12 +55,15 @@ def find_b(amps, blanking=50):
     """鎖定一次海床 (Sea Floor) 位置"""
     return int(np.argmax(amps[blanking:])) + blanking
 
-def extract_valid_thickness(amps, idx_b):
+def extract_valid_thickness(amps, idx_b, local_v):
     """
-    結合包絡線與防雷邏輯的厚度萃取核心
+    結合包絡線、防雷邏輯與「動態區域聲速」的厚度萃取核心
     """
-    s = idx_b + int(0.15 / SDEP)  # 盲區 15cm
-    e = min(len(amps), idx_b + int(4.0 / SDEP)) # 探測深度 4m
+    # 根據該點的材質聲速，計算該點專屬的 SDEP (每取樣點代表深度)
+    local_sdep = NS * local_v / 2
+    
+    s = idx_b + int(0.15 / local_sdep)  # 盲區 15cm
+    e = min(len(amps), idx_b + int(4.0 / local_sdep)) # 探測深度 4m
     
     if e - s < 10:
         return None
@@ -60,7 +78,7 @@ def extract_valid_thickness(amps, idx_b):
     peaks, properties = find_peaks(
         db_win, 
         prominence=3.0, 
-        distance=int(0.15 / SDEP),
+        distance=int(0.15 / local_sdep), # 動態距離限制
         height=noise_floor,
         width=2
     )
@@ -71,11 +89,10 @@ def extract_valid_thickness(amps, idx_b):
     best_idx = np.argmax(properties["prominences"] * properties["peak_heights"])
     best_peak_pos = peaks[best_idx]
     
-    # 3. 計算實體厚度
-    thick = (s + best_peak_pos - idx_b) * SDEP 
+    # 3. 計算實體厚度 (套用該區域專屬聲速)
+    thick = (s + best_peak_pos - idx_b) * local_sdep 
 
-    # 4. 防雷過濾：檢查是否撞到 BS (Surface-Bottom) 多次反射波
-    # 如果找到的厚度與吃水深度極度接近 (誤差 < 15cm)，則視為假訊號並捨棄
+    # 4. 防雷過濾：檢查是否撞到 BS 多次反射波
     if abs(thick - SONAR_DRAFT) < 0.15:
         return None
 
@@ -87,11 +104,18 @@ def extract_valid_thickness(amps, idx_b):
 def main():
     transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{EPSG}", always_xy=True)
 
+    # 讀取底質分類圖，作為聲速查詢表
+    print("0. Loading Sediment Classification Map for Velocity Correction...")
+    with rasterio.open(SED_TIF) as src_sed:
+        sed_data = src_sed.read(1)
+        sed_transform = src_sed.transform
+        sed_height, sed_width = sed_data.shape
+
     # 1. 萃取所有測線的有效厚度
     all_x, all_y, all_thick = [], [], []
     n_total, n_valid, n_rejected = 0, 0, 0
 
-    print("1. Extracting Acoustic Thickness along tracklines...")
+    print("1. Extracting Acoustic Thickness along tracklines (with variable Vp)...")
     for jsf in tqdm(sorted(SBP_PATH.glob("*.jsf")), desc="Processing JSF"):
         data = read_sbp_jsf(jsf)
         if "SBP" not in data: continue
@@ -103,10 +127,31 @@ def main():
         x, y = transformer.transform(d["lon"][valid], d["lat"][valid])
         amps = d["amps"][valid].astype(np.float32)
 
+        # -- 高速空間抽樣 (Vectorized Spatial Sampling) --
+        # 將整條測線的 X, Y 瞬間轉換為底質圖的像素行列 (row, col)
+        rows, cols = rasterio.transform.rowcol(sed_transform, x, y)
+        rows = np.array(rows)
+        cols = np.array(cols)
+        
+        # 建立一個全塞滿預設水速的陣列
+        local_vs = np.full(len(x), SOUND_SPEED, dtype=np.float64)
+        
+        # 過濾掉超出底質圖範圍的點
+        valid_rc = (rows >= 0) & (rows < sed_height) & (cols >= 0) & (cols < sed_width)
+        
+        # 查表替換聲速
+        if valid_rc.any():
+            cls_ids = sed_data[rows[valid_rc], cols[valid_rc]]
+            for k, v in VP_DICT.items():
+                # 找出符合該材質的點，將其聲速覆蓋上去
+                match_mask = (cls_ids == k)
+                local_vs[np.where(valid_rc)[0][match_mask]] = v
+
+        # 開始逐點計算厚度
         for i in range(len(amps)):
             n_total += 1
             idx_b = find_b(amps[i])
-            thick = extract_valid_thickness(amps[i], idx_b)
+            thick = extract_valid_thickness(amps[i], idx_b, local_vs[i])
             
             if thick is not None and THICK_CLIP[0] <= thick <= THICK_CLIP[1]:
                 all_x.append(x[i])
@@ -144,7 +189,6 @@ def main():
     ys_grid = transform.f + (np.arange(height) + 0.5) * (-res)
     grid_x, grid_y = np.meshgrid(xs_grid, ys_grid)
     
-    # 建立需要內插的有效網格點 (只在有水深資料的地方算厚度)
     if mbes_nodata is not None:
         valid_grid = (mbes_data != mbes_nodata)
     else:
@@ -154,8 +198,6 @@ def main():
     target_y = grid_y[valid_grid]
 
     print("\n3. Performing Spatial Interpolation (IDW via KDTree)...")
-    from scipy.spatial import cKDTree
-    
     dx = np.diff(all_x)
     dy = np.diff(all_y)
     dist = np.hypot(dx, dy)
@@ -184,6 +226,7 @@ def main():
         
         weights = 1.0 / (valid_dist ** 2 + smoothing)
         interpolated_thick[i] = np.sum(weights * all_thick[valid_idx]) / np.sum(weights)
+        
     thick_2d = np.full((height, width), -9999.0, dtype=np.float32)
     valid_interp_mask = np.isfinite(interpolated_thick)
     thick_2d[valid_grid] = np.where(valid_interp_mask, interpolated_thick, -9999.0)
