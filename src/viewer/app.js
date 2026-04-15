@@ -49,7 +49,7 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 
 fetch(API + '/api/layers').then(r => r.json()).then(data => {
     if (data.bounds) { map.setMaxBounds(L.latLngBounds(data.bounds).pad(0.3)); map.fitBounds(L.latLngBounds(data.bounds).pad(0.05)); }
-    for (const [key, cfg] of Object.entries(data.layers)) { tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 22 }); }
+    for (const [key, cfg] of Object.entries(data.layers)) { tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 22, maxNativeZoom: 22 }); }
     if (tileLayers['bathymetry']) { tileLayers['bathymetry'].addTo(map); currentOverlay = tileLayers['bathymetry']; }
 });
 
@@ -698,37 +698,512 @@ map.on('mouseup', (e) => {
 });
 
 function doPointQuery(lat, lon) {
-    if (clickMarker) clickMarker.setLatLng([lat, lon]); else clickMarker = L.circleMarker([lat, lon], { radius: 6, color: '#F57D15', fillColor: '#F57D15', fillOpacity: 0.8, weight: 2 }).addTo(map);
-    let htmlId = `query-${Math.floor(Math.random()*1000)}`;
-    const popup = L.popup({ maxWidth: 300 }).setLatLng([lat, lon]).setContent(`<div id="${htmlId}" class="w-56"><div class="font-mono text-xs text-blue-600 font-bold border-b border-slate-100 pb-1 mb-1">📍 ${lat.toFixed(5)}, ${lon.toFixed(5)}</div><div class="text-xs text-slate-400 animate-pulse mt-2">Extracting data...</div></div>`).openOn(map);
-    fetch(`${API}/api/query?lat=${lat}&lon=${lon}`).then(r => r.json()).then(data => {
-        let html = `<div class="font-mono text-[11px] text-blue-600 font-bold border-b border-slate-100 pb-1 mb-1">📍 ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>`;
-        for (const [key, info] of Object.entries(data)) {
-            if (['lat', 'lon', 'x_3826', 'y_3826'].includes(key) || !info || !info.name || info.value === null) continue;
-            if (key === 'sediment_class') html += `<div class="text-xs flex justify-between py-1 items-center"><span class="font-semibold text-slate-600">${info.name}:</span> <span class="text-[10px] text-white px-1.5 py-0.5 rounded shadow-sm" style="background:${SED_COLORS[info.class_id] || '#888'}">${info.value}</span></div>`;
-            else html += `<div class="text-xs flex justify-between py-1"><span class="font-semibold text-slate-600">${info.name}:</span> <span class="text-slate-900 font-medium">${info.value} <span class="text-[10px] text-slate-500">${info.units}</span></span></div>`;
-        }
-        if (document.getElementById(htmlId)) { document.getElementById(htmlId).innerHTML = html; popup.update(); }
-    });
+    console.log(`=== 🔍 執行單點查詢: ${lat.toFixed(5)}, ${lon.toFixed(5)} ===`);
+    
+    if (clickMarker) {
+        clickMarker.setLatLng([lat, lon]);
+    } else {
+        clickMarker = L.circleMarker([lat, lon], { 
+            radius: 6, color: '#F57D15', fillColor: '#F57D15', fillOpacity: 0.8, weight: 2 
+        }).addTo(map);
+    }
+
+    const loadingHtml = `
+        <div class="w-56 p-1">
+            <div class="font-mono text-[11px] text-blue-600 font-bold border-b border-slate-100 pb-1 mb-2">📍 ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+            <div class="text-xs text-slate-400 animate-pulse mt-2 flex items-center gap-1">
+                <span>⏳ 擷取地層數據中...</span>
+            </div>
+        </div>
+    `;
+    
+    // 將 popup 設為全域變數以便後續觸發 update()
+    const popup = L.popup({ maxWidth: 300, autoClose: true, closeOnClick: true, autoPanPadding: [20, 20] })
+        .setLatLng([lat, lon])
+        .setContent(loadingHtml)
+        .openOn(map);
+
+    fetch(`${API}/api/query?lat=${lat}&lon=${lon}`)
+        .then(r => r.json())
+        .then(data => {
+            console.log("📦 成功收到後端資料:", data);
+            
+            let html = `<div class="w-56 p-1">`;
+            html += `<div class="font-mono text-[11px] text-blue-600 font-bold border-b border-slate-100 pb-1 mb-2">📍 ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>`;
+            
+            if (data.error) {
+                html += `<div class="text-red-500 text-xs font-bold py-2 text-center">⚠️ ${data.error}</div></div>`;
+                popup.setContent(html);
+                popup.update();
+                return;
+            }
+
+            // --- 1. 核心指標提取 (水深、厚度、底質) ---
+            const coreKeys = ['bathymetry', 'isopach', 'sediment_class'];
+            let hasCoreData = false;
+            let primaryHtml = '';
+
+            coreKeys.forEach(key => {
+                const info = data[key];
+                if (info && info.value !== null) {
+                    hasCoreData = true;
+                    if (key === 'sediment_class') {
+                        const classId = info.class_id !== undefined ? info.class_id : -1;
+                        const color = (typeof SED_NATURAL_COLORS !== 'undefined' && SED_NATURAL_COLORS[classId]) ? SED_NATURAL_COLORS[classId] : '#888';
+                        primaryHtml += `
+                            <div class="text-[11px] flex justify-between py-1.5 items-center border-b border-slate-50">
+                                <span class="font-bold text-slate-700">${info.name}:</span> 
+                                <span class="text-[10px] text-white px-1.5 py-0.5 rounded shadow-sm" style="background:${color}">${info.value}</span>
+                            </div>`;
+                    } else {
+                        let val = (typeof info.value === 'number' && info.value % 1 !== 0) ? info.value.toFixed(2) : info.value;
+                        const unitHtml = info.units ? `<span class="text-[10px] text-slate-500 ml-1">${info.units}</span>` : '';
+                        primaryHtml += `
+                            <div class="text-[11px] flex justify-between py-1.5 border-b border-slate-50">
+                                <span class="font-bold text-slate-700">${info.name}:</span> 
+                                <span class="text-blue-600 font-bold">${val}${unitHtml}</span>
+                            </div>`;
+                    }
+                }
+            });
+
+            // --- 2. 進階參數提取 (其他所有資料) ---
+            let secondaryHtml = '';
+            let hasSecondaryData = false;
+
+            for (const [key, info] of Object.entries(data)) {
+                if (['lat', 'lon', 'x_3826', 'y_3826'].includes(key) || coreKeys.includes(key) || !info || !info.name || info.value === null) continue;
+                
+                hasSecondaryData = true;
+                let val = (typeof info.value === 'number' && info.value % 1 !== 0) ? info.value.toFixed(2) : info.value;
+                const unitHtml = info.units ? `<span class="text-[10px] text-slate-500 ml-1">${info.units}</span>` : '';
+                secondaryHtml += `
+                    <div class="text-[10px] flex justify-between py-1 border-b border-slate-100 last:border-0">
+                        <span class="text-slate-500">${info.name}:</span> 
+                        <span class="text-slate-800 font-mono">${val}${unitHtml}</span>
+                    </div>`;
+            }
+
+            // --- 3. 組裝 HTML 畫面 ---
+            if (!hasCoreData && !hasSecondaryData) {
+                html += `<div class="text-slate-400 text-[11px] py-4 text-center font-bold">此座標無地層資料</div>`;
+            } else {
+                html += primaryHtml;
+                
+                // 如果有進階參數，建立一個可摺疊的 <details> 區塊
+                if (hasSecondaryData) {
+                    // 💡 關鍵：加入 ontoggle 事件。當使用者展開時，延遲 10ms 呼叫 popup.update()，讓 Leaflet 重新計算高度並自動平移，防止破版！
+                    html += `
+                        <details class="mt-1 group" ontoggle="setTimeout(() => { if(window.map && window.map._popup) window.map._popup.update(); }, 50)">
+                            <summary class="text-[10px] text-slate-400 cursor-pointer py-1.5 hover:text-blue-500 select-none outline-none font-bold flex items-center gap-1 transition-colors">
+                                <span class="group-open:rotate-90 transition-transform text-[8px]">▶</span> 顯示進階探測參數
+                            </summary>
+                            <div class="pt-1 pb-2 bg-slate-50/50 rounded px-1.5 mt-1 border border-slate-100">
+                                ${secondaryHtml}
+                            </div>
+                        </details>
+                    `;
+                }
+            }
+            
+            html += `</div>`;
+            
+            popup.setContent(html);
+            popup.update(); 
+        })
+        .catch(err => {
+            console.error("❌ 解析資料失敗:", err);
+            popup.setContent(`<div class="w-56 p-3 text-red-500 text-xs font-bold text-center">⚠️ 介面渲染失敗</div>`);
+            popup.update();
+        });
 }
 
 function doRegionSelect(bounds) {
-    let htmlId = `stats-${Math.floor(Math.random()*1000)}`;
-    const popup = L.popup({ maxWidth: 350 }).setLatLng(bounds.getCenter()).setContent(`<div id="${htmlId}" class="w-64"><div class="font-bold text-blue-600 border-b border-slate-100 pb-1 mb-1 text-sm">📐 Region Statistics</div><div class="text-xs text-slate-400 animate-pulse mt-2">Calculating pixels...</div></div>`).openOn(map);
+    console.log("=== 🔍 執行框選，直接開啟 3D ===");
+    
+    // 1. 將 2D 地圖縮放至框選範圍
+    // map.fitBounds(bounds, { padding: [50, 50] });
+
     const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
-    Promise.all([ fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`).then(r => r.json()), fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`).then(r => r.json()) ])
-      .then(([sw_d, ne_d]) => fetch(`${API}/api/stats?x0=${sw_d.x_3826}&y0=${sw_d.y_3826}&x1=${ne_d.x_3826}&y1=${ne_d.y_3826}`))
-      .then(r => r.json()).then(stats => {
-        let html = `<div class="font-bold text-blue-600 border-b border-slate-100 pb-1 mb-1 text-sm">📐 Area: ${stats.width_m} × ${stats.height_m} m</div>`;
-        for (const [key, info] of Object.entries(stats.layers)) {
-            if (info.value === null && !info.dominant) continue;
-            if (info.dominant) html += `<div class="text-xs flex justify-between py-1 border-b border-slate-50"><span class="font-semibold text-slate-600">${info.name}:</span> <span class="text-slate-900 font-medium">${info.dominant} (${info.purity}%)</span></div>`;
-            else html += `<div class="text-xs flex justify-between py-1 border-b border-slate-50 flex-col"><span class="font-semibold text-slate-600">${info.name}:</span> <span class="text-slate-900 text-right font-medium">${info.min} ~ ${info.max} ${info.units}<br><span class="text-[10px] text-slate-400">μ = ${info.mean}</span></span></div>`;
+
+    // 2. 只做一件事：打 API 把 lat/lon 轉成 EPSG:3826
+    Promise.all([
+        fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`).then(r => r.json()),
+        fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`).then(r => r.json())
+    ])
+    .then(([sw_d, ne_d]) => {
+        if (sw_d.error || ne_d.error) {
+            alert("座標轉換失敗，無法開啟 3D！");
+            return;
         }
-        if (document.getElementById(htmlId)) { document.getElementById(htmlId).innerHTML = html; popup.update(); }
+
+        const x0 = sw_d.x_3826, y0 = sw_d.y_3826;
+        const x1 = ne_d.x_3826, y1 = ne_d.y_3826;
+
+        console.log(`轉換完成，準備呼叫 3D 引擎: x0=${x0}, y0=${y0}, x1=${x1}, y1=${y1}`);
+
+        // 3. 略過所有統計資料，直接彈出 3D 視窗！
+        if (typeof window.build3DScene === 'function') {
+            window.build3DScene(x0, y0, x1, y1);
+        } else {
+            alert("找不到 3D 渲染函數，請確認程式碼是否完整！");
+        }
+    })
+    .catch(err => {
+        console.error("❌ 捕捉到錯誤:", err);
+        alert(`無法連線到伺服器: ${err.message}`);
     });
-    map.fitBounds(bounds, { padding: [50, 50] });
 }
+
+let currentRenderer = null;
+
+// 綁定關閉按鈕 (確保 HTML 已經載入)
+document.addEventListener('DOMContentLoaded', () => {
+    const closeBtn = document.getElementById('btn-close-3d');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            document.getElementById('modal-3d').classList.add('hidden');
+        });
+    }
+});
+
+// 全域函數，讓 HTML 內的 onclick 可以呼叫
+window.build3DScene = function(x0, y0, x1, y1) {
+    console.log(`3. 啟動 3D 引擎，請求範圍: ${x0}, ${y0} to ${x1}, ${y1}`);
+    
+    // 檢查是否有引入 Three.js
+    if (typeof THREE === 'undefined') {
+        alert("找不到 Three.js 套件！請確認 HTML 的 <head> 裡有加入 script 標籤。");
+        return;
+    }
+
+    const modal = document.getElementById('modal-3d');
+    const container = document.getElementById('canvas-container-3d');
+    const loading = document.getElementById('loading-3d');
+    
+    if (!modal || !container || !loading) {
+        console.error("找不到 HTML 中的 3D 容器 (modal-3d 等 id)");
+        return;
+    }
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+
+    if (currentRenderer) {
+        container.innerHTML = '';
+        currentRenderer.dispose();
+    }
+
+    fetch(`${API}/api/3d-scene?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { 
+                alert("後端回傳錯誤: " + data.error); 
+                loading.classList.add('hidden');
+                modal.classList.add('hidden');
+                return; 
+            }
+            console.log("4. 成功取得 3D 資料，開始渲染...", data);
+            initThreeJS(container, data);
+            loading.classList.add('hidden');
+        })
+        .catch(err => {
+            console.error("API /api/3d-scene 錯誤:", err);
+            alert("載入 3D 失敗，請檢查後端 API 是否正常啟動");
+            loading.classList.add('hidden');
+            modal.classList.add('hidden');
+        });
+}
+
+
+window.currentRenderer = null;
+window.currentAnimationId = null; 
+window.currentControls = null;
+
+function initThreeJS(container, data) {
+    const { width, height, step_m, bathymetry, bedrock, sss_texture, sediment_val } = data;
+
+    container.style.position = 'relative';
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a); 
+
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+    camera.position.set(0, Math.max(width, height) * step_m * 0.8, Math.max(width, height) * step_m * 1.2);
+
+    window.currentRenderer = new THREE.WebGLRenderer({ antialias: true });
+    window.currentRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(window.currentRenderer.domElement);
+
+    window.currentControls = new THREE.OrbitControls(camera, window.currentRenderer.domElement);
+    window.currentControls.enableDamping = true;
+    window.currentControls.autoRotate = false;
+
+    // --- 1. 光源設定 ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(200, 300, 100);
+    scene.add(dirLight);
+
+    // --- 2. 核心參數與顏色映射 ---
+    const Z_EXAGGERATION = 3.0; 
+    let validBathymetry = bathymetry.filter(v => !isNaN(v));
+    const minD = Math.min(...validBathymetry);
+    const maxD = Math.max(...validBathymetry);
+    const meanDepth = validBathymetry.reduce((a, b) => a + b, 0) / validBathymetry.length;
+
+    // 🎨 精確 Turbo_r 演算法 (紅淺 -> 藍深)
+    const getTurboR = (depth) => {
+        let t = (depth - minD) / (maxD - minD || 1);
+        t = 1 - Math.max(0, Math.min(1, t)); // 反轉
+        const r = 0.1357 + 4.5974*t - 42.327*t*t + 130.588*Math.pow(t,3) - 150.566*Math.pow(t,4) + 58.137*Math.pow(t,5);
+        const g = 0.0914 + 2.1941*t - 4.843*t*t + 14.185*Math.pow(t,3) - 32.171*Math.pow(t,4) + 28.533*Math.pow(t,5);
+        const b = 0.1066 + 12.641*t - 60.582*t*t + 110.362*Math.pow(t,3) - 89.903*Math.pow(t,4) + 27.348*Math.pow(t,5);
+        return new THREE.Color(Math.max(0,Math.min(1,r)), Math.max(0,Math.min(1,g)), Math.max(0,Math.min(1,b)));
+    };
+
+    // 🎨 動態抓取沉積層顏色 (完美對齊外部圖例)
+    let sedHex = '#8a8578'; // 預設灰褐
+    let sedLabel = 'Unknown';
+    if (sediment_val !== undefined && sediment_val !== null) {
+        let id = -1;
+        if (typeof sediment_val === 'number') id = Math.round(sediment_val);
+        else if (typeof sediment_val === 'string') id = SED_LABELS.findIndex(l => l === sediment_val);
+        
+        if (id >= 0 && id < SED_NATURAL_COLORS.length) {
+            sedHex = SED_NATURAL_COLORS[id];
+            sedLabel = SED_LABELS[id];
+        }
+    }
+    const bedrockHex = '#1e293b'; // 深岩盤色
+
+    // --- 3. 建立 3D 紋理 ---
+    let sssTexture = null;
+    if (sss_texture) {
+        const texData = new Uint8Array(width * height * 4);
+        for (let i = 0; i < sss_texture.length; i++) {
+            const v = sss_texture[i];
+            const contrast = Math.pow(v / 255, 1.2) * 255; 
+            texData[i*4] = contrast; texData[i*4+1] = contrast*0.75; texData[i*4+2] = contrast*0.2; texData[i*4+3] = 255;
+        }
+        sssTexture = new THREE.DataTexture(texData, width, height, THREE.RGBAFormat);
+        sssTexture.needsUpdate = true;
+    }
+
+    const bathyTexData = new Uint8Array(width * height * 4);
+    for (let i = 0; i < bathymetry.length; i++) {
+        const c = getTurboR(bathymetry[i]);
+        bathyTexData[i*4] = c.r*255; bathyTexData[i*4+1] = c.g*255; bathyTexData[i*4+2] = c.b*255; bathyTexData[i*4+3] = 255;
+    }
+    const bathyTexture = new THREE.DataTexture(bathyTexData, width, height, THREE.RGBAFormat);
+    bathyTexture.needsUpdate = true;
+
+    // --- 4. 計算空間座標 ---
+    const posS = new Float32Array(bathymetry.length * 3);
+    const posB = new Float32Array(bathymetry.length * 3);
+    const posBase = new Float32Array(bathymetry.length * 3);
+
+    let minBedrockZ = Infinity;
+    for (let i = 0; i < bathymetry.length; i++) {
+        const x = (i % width) * step_m;
+        const y = Math.floor(i / width) * step_m;
+        const zS = -(bathymetry[i] - meanDepth) * Z_EXAGGERATION;
+        const zB = bedrock ? -(bedrock[i] - meanDepth) * Z_EXAGGERATION : zS - 2;
+
+        if (zB < minBedrockZ) minBedrockZ = zB;
+        posS[i*3] = x; posS[i*3+1] = zS; posS[i*3+2] = y;
+        posB[i*3] = x; posB[i*3+1] = zB; posB[i*3+2] = y;
+    }
+
+    const baseZ = minBedrockZ - 10;
+    for (let i = 0; i < bathymetry.length; i++) {
+        posBase[i*3] = posS[i*3]; posBase[i*3+1] = baseZ; posBase[i*3+2] = posS[i*3+2];
+    }
+
+    // --- 5. 建模與填滿側邊 ---
+    const matSurface = new THREE.MeshStandardMaterial({ map: bathyTexture, flatShading: true, side: THREE.DoubleSide });
+    const matSediment = new THREE.MeshStandardMaterial({ color: new THREE.Color(sedHex), flatShading: true, side: THREE.DoubleSide });
+    const matBedrock = new THREE.MeshStandardMaterial({ color: new THREE.Color(bedrockHex), flatShading: true, side: THREE.DoubleSide });
+
+    const createPlane = (posArray) => {
+        const geom = new THREE.PlaneGeometry(width * step_m, height * step_m, width - 1, height - 1);
+        geom.rotateX(-Math.PI / 2);
+        geom.translate((width * step_m)/2, 0, (height * step_m)/2);
+        geom.attributes.position.array.set(posArray);
+        geom.computeVertexNormals();
+        return geom;
+    };
+
+    const group = new THREE.Group();
+    group.position.set(-(width * step_m)/2, 0, -(height * step_m)/2);
+    scene.add(group);
+    group.add(new THREE.Mesh(createPlane(posS), matSurface));
+    group.add(new THREE.Mesh(createPlane(posB), matBedrock));
+
+    const createWall = (tArr, bArr, count, indices, mat) => {
+        const wallGeom = new THREE.PlaneGeometry(1, 1, count - 1, 1);
+        const wallPos = wallGeom.attributes.position.array;
+        for (let i = 0; i < count; i++) {
+            const idx = indices[i];
+            wallPos[i*3] = tArr[idx*3]; wallPos[i*3+1] = tArr[idx*3+1]; wallPos[i*3+2] = tArr[idx*3+2];
+            wallPos[(i+count)*3] = bArr[idx*3]; wallPos[(i+count)*3+1] = bArr[idx*3+1]; wallPos[(i+count)*3+2] = bArr[idx*3+2];
+        }
+        wallGeom.computeVertexNormals();
+        return new THREE.Mesh(wallGeom, mat);
+    };
+
+    const idxSouth = Array.from({length: width}, (_, i) => i);
+    const idxNorth = Array.from({length: width}, (_, i) => (height-1)*width + i);
+    const idxWest = Array.from({length: height}, (_, i) => i*width);
+    const idxEast = Array.from({length: height}, (_, i) => i*width + width - 1);
+
+    group.add(createWall(posS, posB, width, idxSouth, matSediment));
+    group.add(createWall(posS, posB, width, idxNorth, matSediment));
+    group.add(createWall(posS, posB, height, idxWest, matSediment));
+    group.add(createWall(posS, posB, height, idxEast, matSediment));
+
+    group.add(createWall(posB, posBase, width, idxSouth, matBedrock));
+    group.add(createWall(posB, posBase, width, idxNorth, matBedrock));
+    group.add(createWall(posB, posBase, height, idxWest, matBedrock));
+    group.add(createWall(posB, posBase, height, idxEast, matBedrock));
+
+    // --- 6. 加上 Bounding Box (3D 高度尺與邊界輔助線) ---
+    const boxHelper = new THREE.BoxHelper(group, 0x475569);
+    scene.add(boxHelper);
+
+    // ==========================================
+    // 🛠️ 7. 建立 3D 左上角資料面板 (高度尺與材質)
+    // ==========================================
+    const infoOverlay = document.createElement('div');
+    // 統一設定：top-4, w-64, h-[200px], flex flex-col
+    infoOverlay.className = "absolute top-16 left-4 bg-slate-900/80 border border-slate-600 rounded-lg p-4 z-10 shadow-2xl text-slate-200 text-xs backdrop-blur-md pointer-events-none w-64 h-[220px] flex flex-col justify-between";
+    infoOverlay.innerHTML = `
+        <div class="font-bold text-blue-400 border-b border-slate-600 pb-2 mb-2 shrink-0">📊 Section Metrics</div>
+        
+        <div class="flex-1 flex flex-col justify-around">
+            <div class="flex justify-between gap-2"><span class="text-slate-400">Length x Width:</span> <span class="font-mono">${(width*step_m).toFixed(1)} x ${(height*step_m).toFixed(1)} m</span></div>
+            <div class="flex justify-between gap-2"><span class="text-slate-400">Depth Range:</span> <span class="font-mono">${minD.toFixed(1)} ~ ${maxD.toFixed(1)} m</span></div>
+            <div class="flex justify-between gap-2"><span class="text-slate-400">Surf. Material:</span> <span class="font-mono flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm inline-block shadow-sm" style="background:${sedHex}"></span>${sedLabel}</span></div>
+            <div class="flex justify-between gap-2"><span class="text-slate-400">Base Material:</span> <span class="font-mono flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm inline-block bg-slate-800 shadow-sm border border-slate-500"></span>Weathered Rock</span></div>
+        </div>
+    `;
+    container.appendChild(infoOverlay);
+
+    // ==========================================
+    // 🛠️ 8. 右上角控制面板 (已移除透明度滑桿)
+    // ==========================================
+    const uiOverlay = document.createElement('div');
+    uiOverlay.className = "absolute top-16 right-4 bg-slate-900/90 border border-slate-600 rounded-lg p-4 z-10 shadow-2xl w-56 text-slate-200 text-sm backdrop-blur-md";
+    uiOverlay.innerHTML = `
+        <h4 class="font-bold mb-3 border-b border-slate-600 pb-1 text-blue-400">🔍 圖層控制器</h4>
+        <label class="flex items-center gap-2 cursor-pointer hover:text-white transition-colors">
+            <input type="checkbox" id="ctrl-sss" class="w-4 h-4 rounded accent-blue-600">
+            <span>SSS 聲納影像</span>
+        </label>
+    `;
+    container.appendChild(uiOverlay);
+
+    // 僅保留 SSS 貼圖的切換邏輯
+    document.getElementById('ctrl-sss').addEventListener('change', (e) => {
+        matSurface.map = e.target.checked ? (sssTexture || bathyTexture) : bathyTexture;
+        matSurface.needsUpdate = true;
+    });
+
+    function animate() {
+        window.currentAnimationId = requestAnimationFrame(animate);
+        window.currentControls.update(); 
+        window.currentRenderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+        const modal = document.getElementById('modal-3d');
+        if (modal && !modal.classList.contains('hidden')) {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            if (window.currentRenderer) window.currentRenderer.setSize(container.clientWidth, container.clientHeight);
+        }
+    });
+}
+
+// 定義關閉 3D 視窗的統一函數
+window.close3D = function() {
+    const modal = document.getElementById('modal-3d');
+    if (!modal) return;
+    
+    // 1. 隱藏視窗與解除鍵盤綁定
+    modal.classList.add('hidden');
+    document.removeEventListener('keydown', onEscKeyDown);
+    
+    // 2. 🛑 停止「殭屍動畫迴圈」(最重要的一步！)
+    if (window.currentAnimationId !== null) {
+        cancelAnimationFrame(window.currentAnimationId);
+        window.currentAnimationId = null;
+    }
+    
+    // 3. 🧹 解除滑鼠控制器的事件綁定 (釋放滑鼠控制權)
+    if (window.currentControls) {
+        window.currentControls.dispose();
+        window.currentControls = null;
+    }
+    
+    // 4. 🔥 銷毀渲染器與拔除畫布
+    if (window.currentRenderer) {
+        window.currentRenderer.dispose();
+        window.currentRenderer = null;
+    }
+    
+    const container = document.getElementById('canvas-container-3d');
+    if (container) {
+        container.innerHTML = ''; // 徹底清空舊的 Canvas
+    }
+};
+
+// 處理 Esc 鍵
+function onEscKeyDown(e) {
+    if (e.key === 'Escape') window.close3D();
+}
+
+window.build3DScene = function(x0, y0, x1, y1) {
+    console.log(`啟動 3D 引擎，請求範圍: ${x0}, ${y0} to ${x1}, ${y1}`);
+    if (typeof THREE === 'undefined') { alert("找不到 Three.js！"); return; }
+
+    const modal = document.getElementById('modal-3d');
+    const container = document.getElementById('canvas-container-3d');
+    const loading = document.getElementById('loading-3d');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    loading.classList.remove('hidden');
+    modal.onclick = (e) => { if (e.target === modal) window.close3D(); };
+    document.addEventListener('keydown', onEscKeyDown);
+
+    if (window.currentRenderer) {
+        container.innerHTML = '';
+        window.currentRenderer.dispose();
+    }
+
+    Promise.all([
+        fetch(`${API}/api/3d-scene?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`).then(r => r.json()),
+        fetch(`${API}/api/stats?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`).then(r => r.json())
+    ])
+    .then(([sceneData, statsData]) => {
+        if (sceneData.error) { window.close3D(); alert(sceneData.error); return; }
+
+        // 💡 提取底質分類，傳遞給 3D 引擎以對齊圖例顏色
+        if (statsData.layers && statsData.layers.sediment_class) {
+            sceneData.sediment_val = statsData.layers.sediment_class.dominant || statsData.layers.sediment_class.mean;
+        }
+
+        initThreeJS(container, sceneData);
+        loading.classList.add('hidden');
+    })
+    .catch(err => {
+        console.error("API 錯誤:", err);
+        alert("載入 3D 失敗，請檢查網路狀態");
+        window.close3D();
+    });
+};
 
 fetch(API + '/api/tracklines').then(r => r.json()).then(geojson => {
     const commonOptions = {

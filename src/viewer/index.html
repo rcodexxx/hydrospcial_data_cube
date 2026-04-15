@@ -16,6 +16,9 @@
     />
     <script src="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.js"></script>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <link rel="stylesheet" href="/static/style.css" />
@@ -432,6 +435,58 @@
                 class="wf-redline absolute left-0 right-0 h-[2px] bg-orange-500 top-0 pointer-events-none"
               ></div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="modal-3d"
+      class="hidden fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center backdrop-blur-sm"
+    >
+      <div
+        class="relative w-[90vw] h-[85vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700"
+      >
+        <div
+          class="absolute top-0 left-0 right-0 h-12 bg-slate-800/90 flex justify-between items-center px-4 z-10"
+        >
+          <h3 class="text-white font-bold tracking-wide">3D 地層解剖視圖</h3>
+          <button
+            onclick="window.close3D()"
+            class="text-slate-400 hover:text-white text-2xl font-bold p-2 transition-colors"
+            title="關閉 (Esc)"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div id="canvas-container-3d" class="w-full h-full"></div>
+
+        <div
+          id="loading-3d"
+          class="absolute inset-0 flex items-center justify-center text-white bg-slate-900 z-20"
+        >
+          <div class="animate-pulse flex flex-col items-center">
+            <span class="text-4xl mb-2">🧊</span>
+            <span>正在生成 3D 網格資料...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-borehole" class="hidden fixed inset-0 z-[9999] bg-black/85 flex items-center justify-center backdrop-blur-sm">
+      <div class="relative w-[400px] h-[80vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col" onclick="event.stopPropagation();">
+        <div class="relative h-12 bg-slate-800/90 flex justify-between items-center px-4 z-[50] border-b border-slate-700 shrink-0">
+          <h3 id="borehole-title" class="text-white font-bold text-sm tracking-wide">
+            🕳️ 虛擬岩心探測 (Virtual Core)
+          </h3>
+          <button onclick="window.closeBorehole()" class="text-slate-400 hover:text-white text-2xl font-bold p-2 transition-colors">&times;</button>
+        </div>
+        <div id="canvas-container-borehole" class="flex-1 w-full bg-[#0a0f1a] relative z-0"></div>
+        <div id="loading-borehole" class="absolute inset-0 flex items-center justify-center text-white bg-slate-900 z-40 hidden">
+          <div class="animate-pulse flex flex-col items-center">
+            <span class="text-4xl mb-2">🕳️</span>
+            <span class="text-sm font-bold text-slate-300">正在鑽取虛擬岩心...</span>
           </div>
         </div>
       </div>

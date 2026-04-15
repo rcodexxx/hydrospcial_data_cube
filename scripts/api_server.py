@@ -15,7 +15,9 @@ Endpoints:
 
 import json
 from pathlib import Path
-
+import math 
+import rasterio
+from rasterio.windows import from_bounds
 import numpy as np
 import uvicorn
 import xarray as xr
@@ -56,6 +58,11 @@ TILE_LAYERS = {
         "label": "Bathymetry",
         "palette": "turbo_r"
     },
+    # "bathymetry": {
+    #     "tif": "mbes_visual_3d.tif",
+    #     "label": "Bathymetry",
+    #     "palette": None
+    # },
     "imagery_lf": {
         "tif": "sss_imagery_lf.tif", 
         "label": "SSS Imagery LF",
@@ -322,6 +329,75 @@ async def profile(coords: str):
                 result[key].append(None)
     
     return result
+
+@app.get("/api/3d-scene")
+async def get_3d_scene(x0: float, y0: float, x1: float, y1: float):
+    # 1. 框選區域
+    min_x, max_x = min(x0, x1), max(x0, x1)
+    min_y, max_y = min(y0, y1), max(y0, y1)
+    
+    region = ds.sel(x=slice(min_x, max_x), y=slice(max_y, min_y))
+
+    if region.sizes['x'] == 0 or region.sizes['y'] == 0:
+        return {"error": "No data in selected region"}
+
+    # 2. 地形降採樣 (保護 3D 效能)
+    max_grid_size = 150
+    step = max(1, math.ceil(max(region.sizes['x'], region.sizes['y']) / max_grid_size))
+    region_downsampled = region.isel(x=slice(None, None, step), y=slice(None, None, step))
+
+    w, h = region_downsampled.sizes['x'], region_downsampled.sizes['y']
+
+    # 3. 抽取地形與基岩
+    bathy_array = region_downsampled['bathymetry'].fillna(region_downsampled['bathymetry'].mean())
+    bathymetry_1d = bathy_array.values.flatten().tolist()
+
+    bedrock_1d = None
+    if 'isopach' in region_downsampled.data_vars:
+        isopach_array = region_downsampled['isopach'].fillna(0)
+        bedrock_array = bathy_array + isopach_array
+        bedrock_1d = bedrock_array.values.flatten().tolist()
+
+    # 4. 🔥 從高解析度 TIF 直接裁切 SSS 紋理 (不透過 Data Cube)
+    sss_texture_1d = None
+    sss_path = TIF_DIR / "sss_imagery_hf.tif" # 指向你的高解析度圖檔
+
+    if sss_path.exists():
+        try:
+            with rasterio.open(sss_path) as src:
+                # 取得該範圍在原圖上的「視窗 (Window)」
+                window = from_bounds(min_x, min_y, max_x, max_y, transform=src.transform)
+                
+                # 直接裁切讀取
+                # 為了跟 3D 網格對齊，我們要求 rasterio 將切出來的圖片縮放到 w * h 大小
+                sss_array = src.read(1, window=window, out_shape=(h, w))
+                
+                # 處理 NoData 並正規化到 0-255
+                nodata = src.nodata
+                if nodata is not None:
+                    sss_array[sss_array == nodata] = 0 # 沒資料就填黑
+                
+                # 防呆：避免整塊都是黑的導致除以零
+                sss_min, sss_max = np.nanmin(sss_array), np.nanmax(sss_array)
+                if sss_max > sss_min:
+                    sss_norm = ((sss_array - sss_min) / (sss_max - sss_min) * 255).astype(np.uint8)
+                    # Rasterio 讀出來的 Y 軸方向跟 Xarray 可能相反，這裡確保與地形對齊
+                    # 如果貼圖上下顛倒，可以把 [::-1, :] 拿掉
+                    sss_texture_1d = sss_norm[::-1, :].flatten().tolist() 
+                else:
+                    # 全黑的情況
+                    sss_texture_1d = [0] * (w * h)
+        except Exception as e:
+            print(f"裁切 SSS 紋理失敗: {e}")
+
+    return {
+        "width": w,
+        "height": h,
+        "step_m": 0.5 * step, 
+        "bathymetry": bathymetry_1d,
+        "bedrock": bedrock_1d,
+        "sss_texture": sss_texture_1d
+    }
 
 
 # ── Run ──────────────────────────────────────────────────────
