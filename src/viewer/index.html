@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hydrospatial Data Cube</title>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -15,240 +22,408 @@
       href="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.css"
     />
     <script src="https://unpkg.com/leaflet-minimap@3.6.1/dist/Control.MiniMap.min.js"></script>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css" />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: { DEFAULT: "#2563eb", accent: "#F57D15", teal: "#1D728A" },
+            },
+            fontFamily: {
+              sans: ['"Noto Sans TC"', "sans-serif"],
+              mono: ['"Roboto Mono"', "monospace"],
+            },
+          },
+        },
+      };
+    </script>
 
-    <style>
-      input[type="range"] {
-        accent-color: #f57d15;
-      }
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f8fafc;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
-      }
-      .leaflet-popup-content-wrapper {
-        border-radius: 8px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-      }
-      .leaflet-popup-content {
-        margin: 12px;
-      }
-      /* 防止拖曳時反白文字 */
-      .no-select {
-        user-select: none;
-        -webkit-user-select: none;
-      }
-    </style>
+    <link rel="stylesheet" href="/viewer/style.css" />
   </head>
-  <body
-    class="h-screen w-screen overflow-hidden bg-slate-50 text-slate-800 font-sans relative flex"
-  >
-    <button
-      id="btn-toggle-sidebar"
-      class="absolute top-4 left-4 z-[2000] bg-white border border-slate-200 p-2 rounded shadow-md text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-    >
-      <svg
-        class="w-5 h-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M4 6h16M4 12h16M4 18h16"
-        ></path>
-      </svg>
-    </button>
 
-    <div
+  <body
+    class="fixed inset-0 overflow-hidden bg-slate-50 text-slate-800 font-sans select-none"
+  >
+    <aside
       id="sidebar"
-      class="absolute top-0 left-0 bottom-0 w-[320px] flex flex-col bg-white border-r border-slate-200 shadow-xl z-[1500] transition-transform duration-300 transform translate-x-0"
+      class="absolute top-0 left-0 bottom-0 w-[320px] flex flex-col bg-slate-50 border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.05)] z-[1500] transition-transform duration-300 ease-in-out transform translate-x-0"
     >
-      <div class="p-5 pl-14 border-b border-slate-100 bg-slate-50">
+      <button
+        id="btn-toggle-sidebar"
+        class="absolute top-1/2 -right-5 -translate-y-1/2 w-5 h-16 bg-white border border-l-0 border-slate-200 rounded-r-md shadow-[4px_0_10px_rgba(0,0,0,0.05)] flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors z-[1501] outline-none"
+      >
+        <svg
+          id="sidebar-chevron"
+          class="w-3 h-3"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="3"
+            d="M15 19l-7-7 7-7"
+          ></path>
+        </svg>
+      </button>
+
+      <header class="p-5 bg-white border-b border-slate-200 shrink-0">
         <h1 class="text-lg font-bold tracking-tight text-slate-900 mb-2">
           Hydrospatial Cube
         </h1>
         <select
-          class="w-full bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-md p-2 shadow-sm outline-none"
+          class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg p-2 shadow-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer hover:bg-white transition-colors"
         >
           <option value="mudan">Mudan Reservoir Survey</option>
         </select>
-      </div>
+      </header>
 
-      <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
-        <div>
+      <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <section
+          class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"
+        >
           <h2
-            class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3"
+            class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"
           >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7c-2 0-3 1-3 3z"
+              ></path>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 12h16"
+              ></path>
+            </svg>
             Data Layers
           </h2>
-          <div class="flex flex-col gap-1">
+          <nav class="flex flex-col gap-1.5">
             <button
-              class="layer-btn active text-left px-3 py-2 text-sm rounded bg-blue-50 border-l-4 border-blue-600 text-blue-700 font-bold"
+              class="layer-btn active flex items-center justify-between px-3 py-2 text-sm rounded-lg bg-slate-800 text-white font-bold transition-all shadow-md"
               data-layer="bathymetry"
             >
-              Bathymetry
+              <span>Bathymetry</span>
+              <svg
+                class="check-icon w-4 h-4 text-blue-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
             </button>
+
             <button
-              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
-              data-layer="imagery_lf"
-            >
-              SSS Imagery LF
-            </button>
-            <button
-              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
               data-layer="imagery_hf"
             >
-              SSS Imagery HF
+              <span>SSS Imagery</span>
+              <svg
+                class="check-icon w-4 h-4 text-blue-400 hidden"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
             </button>
+
             <button
-              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
               data-layer="sediment_class"
             >
-              Sediment Class
+              <span>Sediment Class</span>
+              <svg
+                class="check-icon w-4 h-4 text-blue-400 hidden"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
             </button>
+
             <button
-              class="layer-btn text-left px-3 py-2 text-sm rounded text-slate-600 hover:bg-slate-100 border-l-4 border-transparent font-medium"
+              class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
               data-layer="mag_residual"
             >
-              Magnetic Residual
+              <span>Magnetic Residual</span>
+              <svg
+                class="check-icon w-4 h-4 text-blue-400 hidden"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
             </button>
-          </div>
-          <div
-            class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between"
-          >
-            <label class="text-xs font-semibold text-slate-500">Opacity</label>
+          </nav>
+
+          <div class="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-2">
+            <div class="flex justify-between items-center">
+              <label class="text-[11px] font-bold text-slate-500"
+                >Opacity</label
+              >
+              <span class="text-[10px] font-mono text-slate-400"></span>
+            </div>
             <input
               type="range"
               id="opacity-slider"
-              class="w-2/3 cursor-pointer"
+              class="w-full cursor-pointer"
               min="0"
               max="100"
-              value="75"
+              value="100"
             />
           </div>
-        </div>
-        <div>
+        </section>
+
+        <section
+          class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"
+        >
           <h2
-            class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3"
+            class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-1.5"
           >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+              ></path>
+            </svg>
             Display Settings
           </h2>
-          <div class="space-y-3">
-            <label class="flex items-center gap-3 cursor-pointer"
-              ><input
-                type="checkbox"
-                id="chk-targets"
-                class="w-4 h-4 text-blue-600 rounded"
-                checked
-              /><span class="text-sm font-medium text-slate-700"
-                >Survey Targets</span
-              ></label
-            >
-            <label class="flex items-center gap-3 cursor-pointer"
-              ><input
-                type="checkbox"
-                id="chk-trackline-sss"
-                class="w-4 h-4 text-blue-600 rounded"
-              /><span class="text-sm font-medium text-slate-700"
-                >Tracklines (SSS)</span
-              ></label
-            >
-            <label class="flex items-center gap-3 cursor-pointer"
-              ><input
-                type="checkbox"
-                id="chk-trackline-sbp"
-                class="w-4 h-4 text-pink-600 rounded"
-              /><span class="text-sm font-medium text-slate-700"
-                >Tracklines (SBP)</span
-              ></label
-            >
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div
+          <div class="space-y-4">
+            <label class="flex items-center justify-between cursor-pointer group">
+            <span class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors">Contour Lines</span>
+            <div class="relative inline-flex items-center">
+              <input type="checkbox" id="chk-contours" class="sr-only peer" checked>
+              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+            </div>
+          </label>
+            </label>
+
+            <label
+              class="flex items-center justify-between cursor-pointer group"
+            >
+              <span
+                class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors"
+                >Tracklines (SSS)</span
+              >
+              <div class="relative inline-flex items-center">
+                <input
+                  type="checkbox"
+                  id="chk-trackline-sss"
+                  class="sr-only peer"
+                />
+                <div
+                  class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"
+                ></div>
+              </div>
+            </label>
+
+            <label
+              class="flex items-center justify-between cursor-pointer group"
+            >
+              <span
+                class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors"
+                >Tracklines (SBP)</span
+              >
+              <div class="relative inline-flex items-center">
+                <input
+                  type="checkbox"
+                  id="chk-trackline-sbp"
+                  class="sr-only peer"
+                />
+                <div
+                  class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pink-500"
+                ></div>
+              </div>
+            </label>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <main
       id="map-wrapper"
       class="absolute top-0 left-[320px] right-0 bottom-0 transition-all duration-300 ease-in-out bg-slate-100"
     >
-      <div
-        class="absolute top-4 left-1/2 transform -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur border border-slate-200 p-1.5 rounded-lg shadow-lg flex gap-1 items-center"
+      <nav
+        class="absolute top-6 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur-md border border-slate-200 rounded-full shadow-lg p-1 flex items-center gap-1 select-none"
       >
-        <button
-          class="tool-btn active p-2 rounded hover:bg-slate-100 bg-blue-50 text-blue-600 shadow-sm"
-          data-tool="pan"
-          title="Pan"
-        >
-          🖐
-        </button>
-        <button
-          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
-          data-tool="query"
-          title="Point Query"
-        >
-          📍
-        </button>
-        <button
-          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
-          data-tool="line"
-          title="Profile Line"
-        >
-          ✏️
-        </button>
-        <button
-          class="tool-btn p-2 rounded hover:bg-slate-100 text-slate-500"
-          data-tool="select"
-          title="Region Stats"
-        >
-          ⬜
-        </button>
-        <div class="w-px h-6 bg-slate-200 mx-1"></div>
-        <button
-          id="btn-reset"
-          class="p-2 rounded hover:bg-orange-50 hover:text-orange-600 text-slate-500 transition-colors"
-          title="Reset View"
-        >
-          🔄
-        </button>
-      </div>
+        <div class="flex items-center gap-1">
+          <button
+            id="btn-tool-pan"
+            data-tool="pan"
+            class="tool-btn active p-2 rounded-full transition-all text-white bg-blue-600 shadow-md"
+            title="拖曳地圖 (Pan)"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="btn-tool-query"
+            data-tool="query"
+            class="tool-btn p-2 rounded-full transition-all text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+            title="單點數據查詢 (Point Query)"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+              ></path>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="btn-tool-line"
+            data-tool="line"
+            class="tool-btn p-2 rounded-full transition-all text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+            title="繪製剖面線 (Profile Line)"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="btn-tool-select"
+            data-tool="select"
+            class="tool-btn p-2 rounded-full transition-all text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+            title="框選 3D 地塊 (Region 3D)"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+              ></path>
+            </svg>
+          </button>
+        </div>
+        <div class="w-[1px] h-6 bg-slate-200 mx-2"></div>
+        <div class="flex items-center">
+          <button
+            id="btn-reset"
+            class="p-2 rounded-full transition-all text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+            title="重置畫面與清除視窗 (Reset)"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </nav>
+
       <div id="map" class="w-full h-full z-10"></div>
       <div
         id="coord-display"
-        class="absolute bottom-4 left-4 z-[1000] bg-white/90 border border-slate-200 text-slate-800 text-xs px-3 py-1.5 rounded shadow pointer-events-none"
+        class="absolute bottom-4 left-4 z-[1000] bg-white/90 border border-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-md shadow-sm pointer-events-none font-mono select-text"
       >
         —
       </div>
-    </div>
+    </main>
 
-    <div
+    <section
       id="bottom-panel"
-      class="absolute bottom-0 left-[320px] right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1800] flex flex-col transition-all duration-300 ease-in-out transform translate-y-full"
+      class="absolute bottom-0 left-[320px] right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1800] flex flex-col transition-transform duration-300 ease-in-out transform translate-y-full overflow-hidden"
       style="height: 0px"
     >
       <div
         id="bp-resizer"
         class="absolute top-0 left-0 right-0 h-1.5 cursor-row-resize bg-transparent hover:bg-blue-400 z-50 transition-colors"
       ></div>
-
-      <div
+      <header
         class="flex justify-between items-center px-5 py-2 border-b border-slate-200 bg-slate-50 shrink-0"
       >
         <div class="flex items-center gap-3">
@@ -266,8 +441,7 @@
         >
           &times;
         </button>
-      </div>
-
+      </header>
       <div class="flex-1 flex flex-col overflow-hidden min-h-0">
         <div
           id="bp-top-section"
@@ -288,12 +462,10 @@
             value="0"
           />
         </div>
-
         <div
           id="bp-internal-resizer"
-          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1 hidden"
+          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1 hidden transition-colors"
         ></div>
-
         <div
           id="bp-sbp-section"
           class="w-full relative hidden flex-1 min-h-[100px] overflow-hidden pb-3"
@@ -318,58 +490,30 @@
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div
+    <section
       id="right-panel"
-      class="absolute top-0 right-0 bottom-0 bg-white border-l border-slate-200 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] z-[1900] flex flex-col transition-all duration-300 ease-in-out transform translate-x-full"
+      class="absolute top-0 right-0 bottom-0 bg-white border-l border-slate-200 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] z-[1900] flex flex-col transition-transform duration-300 ease-in-out transform translate-x-full overflow-hidden"
       style="width: 0px"
     >
       <div
         id="rp-resizer"
         class="absolute top-0 bottom-0 left-0 w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400 z-50 transition-colors"
       ></div>
-
-      <div
+      <header
         class="flex justify-between items-center px-5 py-3 border-b border-slate-200 bg-slate-50 shrink-0"
       >
         <span id="rp-title" class="font-bold text-slate-800 text-sm"
           >SSS Viewer</span
         >
-        <div
-          class="bg-slate-200 p-0.5 rounded flex gap-1 text-[11px] font-bold ml-4"
-        >
-          <button
-            id="tab-hf"
-            onclick="setSSSMode('hf')"
-            class="sss-tab px-2 py-1 rounded bg-white shadow-sm text-blue-600 transition-colors"
-          >
-            HF
-          </button>
-          <button
-            id="tab-lf"
-            onclick="setSSSMode('lf')"
-            class="sss-tab px-2 py-1 rounded text-slate-500 hover:text-slate-700 transition-colors"
-          >
-            LF
-          </button>
-          <button
-            id="tab-compare"
-            onclick="setSSSMode('compare')"
-            class="sss-tab px-2 py-1 rounded text-slate-500 hover:text-slate-700 transition-colors"
-          >
-            Compare
-          </button>
-        </div>
-        <div class="flex-1"></div>
         <button
           onclick="closePanels()"
           class="text-slate-400 hover:text-red-500 transition-colors text-2xl leading-none px-2"
         >
           &times;
         </button>
-      </div>
-
+      </header>
       <div class="flex-1 flex flex-col overflow-hidden min-h-0">
         <div
           id="rp-top-section"
@@ -396,22 +540,15 @@
             value="0"
           />
         </div>
-
         <div
           id="rp-internal-resizer"
-          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1"
+          class="w-full h-1.5 cursor-row-resize bg-slate-200 hover:bg-blue-400 shrink-0 my-1 transition-colors"
         ></div>
-
         <div
           id="rp-images"
           class="flex-1 p-4 overflow-y-auto bg-slate-100 flex gap-4"
         >
           <div id="sss-hf-container" class="flex-1 relative hidden">
-            <div
-              class="absolute top-2 left-2 z-10 text-[10px] font-bold text-white bg-black/60 px-2 py-1 rounded"
-            >
-              HF (830 kHz)
-            </div>
             <div
               class="relative rounded shadow-sm bg-black overflow-hidden border border-slate-300"
             >
@@ -421,34 +558,19 @@
               ></div>
             </div>
           </div>
-          <div id="sss-lf-container" class="flex-1 relative hidden">
-            <div
-              class="absolute top-2 left-2 z-10 text-[10px] font-bold text-white bg-black/60 px-2 py-1 rounded"
-            >
-              LF (225 kHz)
-            </div>
-            <div
-              class="relative rounded shadow-sm bg-black overflow-hidden border border-slate-300"
-            >
-              <img id="img-lf" class="w-full h-auto block" src="" />
-              <div
-                class="wf-redline absolute left-0 right-0 h-[2px] bg-orange-500 top-0 pointer-events-none"
-              ></div>
-            </div>
-          </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div
+    <dialog
       id="modal-3d"
-      class="hidden fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center backdrop-blur-sm"
+      class="hidden fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center backdrop-blur-sm w-full h-full m-0 max-w-none bg-transparent"
     >
       <div
         class="relative w-[90vw] h-[85vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700"
       >
-        <div
-          class="absolute top-0 left-0 right-0 h-12 bg-slate-800/90 flex justify-between items-center px-4 z-10"
+        <header
+          class="absolute top-0 left-0 right-0 h-12 bg-slate-800/90 flex justify-between items-center px-4 z-10 border-b border-slate-700"
         >
           <h3 class="text-white font-bold tracking-wide">3D 地層解剖視圖</h3>
           <button
@@ -458,40 +580,89 @@
           >
             &times;
           </button>
-        </div>
-
+        </header>
         <div id="canvas-container-3d" class="w-full h-full"></div>
-
         <div
           id="loading-3d"
           class="absolute inset-0 flex items-center justify-center text-white bg-slate-900 z-20"
         >
           <div class="animate-pulse flex flex-col items-center">
             <span class="text-4xl mb-2">🧊</span>
-            <span>正在生成 3D 網格資料...</span>
+            <span class="text-slate-300 font-bold"
+              >正在生成 3D 網格資料...</span
+            >
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
 
-    <div id="modal-borehole" class="hidden fixed inset-0 z-[9999] bg-black/85 flex items-center justify-center backdrop-blur-sm">
-      <div class="relative w-[400px] h-[80vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col" onclick="event.stopPropagation();">
-        <div class="relative h-12 bg-slate-800/90 flex justify-between items-center px-4 z-[50] border-b border-slate-700 shrink-0">
-          <h3 id="borehole-title" class="text-white font-bold text-sm tracking-wide">
-            🕳️ 虛擬岩心探測 (Virtual Core)
+    <dialog
+      id="modal-borehole"
+      class="hidden fixed inset-0 z-[9999] bg-black/85 flex items-center justify-center backdrop-blur-sm w-full h-full m-0 max-w-none bg-transparent"
+    >
+      <div
+        class="relative w-[400px] h-[80vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col"
+        onclick="event.stopPropagation()"
+      >
+        <header
+          class="relative h-12 bg-slate-800/90 flex justify-between items-center px-4 z-[50] border-b border-slate-700 shrink-0"
+        >
+          <h3
+            id="borehole-title"
+            class="text-white font-bold text-sm tracking-wide flex items-center gap-2"
+          >
+            <svg
+              class="w-4 h-4 text-orange-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+              ></path>
+            </svg>
+            虛擬岩心探測 (Virtual Core)
           </h3>
-          <button onclick="window.closeBorehole()" class="text-slate-400 hover:text-white text-2xl font-bold p-2 transition-colors">&times;</button>
-        </div>
-        <div id="canvas-container-borehole" class="flex-1 w-full bg-[#0a0f1a] relative z-0"></div>
-        <div id="loading-borehole" class="absolute inset-0 flex items-center justify-center text-white bg-slate-900 z-40 hidden">
+          <button
+            onclick="window.closeBorehole()"
+            class="text-slate-400 hover:text-white text-2xl font-bold p-2 transition-colors"
+          >
+            &times;
+          </button>
+        </header>
+        <div
+          id="canvas-container-borehole"
+          class="flex-1 w-full bg-[#0a0f1a] relative z-0"
+        ></div>
+        <div
+          id="loading-borehole"
+          class="absolute inset-0 flex items-center justify-center text-white bg-slate-900 z-40 hidden"
+        >
           <div class="animate-pulse flex flex-col items-center">
-            <span class="text-4xl mb-2">🕳️</span>
-            <span class="text-sm font-bold text-slate-300">正在鑽取虛擬岩心...</span>
+            <svg
+              class="w-10 h-10 text-orange-400 mb-3 animate-spin"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              ></path>
+            </svg>
+            <span class="text-sm font-bold text-slate-300"
+              >正在鑽取虛擬岩心...</span
+            >
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
 
-    <script src="/static/app.js"></script>
+    <script src="/viewer/app.js"></script>
   </body>
 </html>

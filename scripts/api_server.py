@@ -58,11 +58,6 @@ TILE_LAYERS = {
         "label": "Bathymetry",
         "palette": "turbo_r"
     },
-    # "bathymetry": {
-    #     "tif": "mbes_visual_3d.tif",
-    #     "label": "Bathymetry",
-    #     "palette": None
-    # },
     "imagery_lf": {
         "tif": "sss_imagery_lf.tif", 
         "label": "SSS Imagery LF",
@@ -136,7 +131,7 @@ app = FastAPI(title="Hydrospatial Data Cube")
 # serve viewer HTML
 VIEWER_DIR.mkdir(exist_ok=True)
 
-app.mount("/static", StaticFiles(directory=VIEWER_DIR), name="static")
+app.mount("/viewer", StaticFiles(directory=VIEWER_DIR), name="viewer")
 app.mount("/waterfalls", StaticFiles(directory=ROOT / "outputs" / "waterfalls"), name="waterfalls")
 
 

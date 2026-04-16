@@ -1,31 +1,120 @@
-/* 基礎狀態與游標 */
+/* =========================================
+   1. 核心設計變數 (Design Tokens)
+========================================= */
+:root {
+  --color-accent: #F57D15;    /* 你的核心橘色 */
+  --color-teal: #1D728A;      /* 你的輔助水藍色 */
+  --color-navy: #0A2533;      /* 你的深海軍藍 */
+  
+  --color-bg-dark: #0f172a;   /* 系統主要暗底色 (Slate-900) */
+  --color-text-main: #f8fafc; /* 主要亮色文字 */
+}
+
+/* =========================================
+   2. 全局基礎設定 (Base)
+========================================= */
+body {
+  font-family: 'Noto Sans TC', sans-serif;
+  /* 如果你的主畫面是暗的，可以加上這行；如果是亮的則註解掉 */
+  /* background-color: var(--color-bg-dark); color: var(--color-text-main); */
+}
+
+/* 數字或程式碼專用等寬字體 */
+.font-mono, .data-num {
+  font-family: 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums; 
+  letter-spacing: -0.02em;
+}
+
+/* 防止拖曳時反白文字 (推薦在 HTML 直接用 Tailwind 的 select-none) */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* =========================================
+   3. 原生表單與捲軸優化 (Overrides)
+========================================= */
+input[type="range"] {
+  accent-color: var(--color-accent);
+}
+
+/* 現代化暗色捲軸 (配合整體高科技儀表板氛圍) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a; /* Slate-900 */
+}
+::-webkit-scrollbar-thumb {
+  background: #334155; /* Slate-700 */
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569; /* Slate-600 */
+}
+
+/* =========================================
+   4. 地圖與工具游標 (Map & Cursors)
+========================================= */
 .cursor-pan { cursor: grab; }
 .cursor-pan:active { cursor: grabbing; }
 .cursor-query { cursor: crosshair; }
 .cursor-line { cursor: crosshair; }
 .cursor-select { cursor: crosshair; }
 
-/* Leaflet 覆寫 */
-.leaflet-control-zoom a { background: #ffffff !important; color: #0A2533 !important; border-color: #E1F3F8 !important; }
+/* =========================================
+   5. Leaflet 覆寫 (Leaflet UI)
+========================================= */
+.leaflet-control-zoom a { 
+  background: #ffffff !important; 
+  color: var(--color-navy) !important; 
+  border-color: #E1F3F8 !important; 
+}
 
-/* 動態面板文字 (明亮主題) */
-.coord { color: #F57D15; font-weight: bold; font-size: 13px; }
-.label { color: #1D728A; font-weight: 600;} 
-.value { color: #0A2533; font-weight: 500; } 
+/* 讓 Leaflet 的彈出視窗更現代、陰影更柔和，去除多餘邊距留給 Tailwind 控制 */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+  padding: 0; 
+}
+.leaflet-popup-content {
+  margin: 0; 
+  line-height: 1.5;
+}
+
+/* =========================================
+   6. 動態面板與文字層級 (Typography Components)
+========================================= */
+.coord { color: var(--color-accent); font-weight: bold; font-size: 13px; }
+.label { color: var(--color-teal); font-weight: 600; } 
+.value { color: var(--color-navy); font-weight: 500; } 
 .nodata { color: #6CB5C9; font-style: italic; }
-.target-title { color: #F57D15; font-weight: bold; font-size: 14px; }
-.trackline-title { color: #1D728A; font-weight: bold; font-size: 13px; }
+.target-title { color: var(--color-accent); font-weight: bold; font-size: 14px; }
+.trackline-title { color: var(--color-teal); font-weight: bold; font-size: 13px; }
 
-.sed-chip { font-size: 10px; padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: 600; text-shadow: 0px 1px 2px rgba(0,0,0,0.3); display: inline-block; }
+/* 沉積物小標籤 */
+.sed-chip { 
+  font-size: 10px; 
+  padding: 2px 6px; 
+  border-radius: 4px; 
+  color: #fff; 
+  font-weight: 600; 
+  text-shadow: 0px 1px 2px rgba(0,0,0,0.3); 
+  display: inline-block; 
+}
 
-/* 瀑布圖圖片容器 */
+/* =========================================
+   7. 瀑布圖圖片容器 (Waterfall Viewer)
+========================================= */
 #rs-images .wf-row { display: flex; gap: 8px; margin-bottom: 12px; }
 #rs-images .wf-col { flex: 1; position: relative; }
 #rs-images .wf-label { color: #134054; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
 #rs-images .wf-container { position: relative; overflow: hidden; }
 #rs-images .wf-container img { width: 100%; display: block; border: 2px solid #E1F3F8; border-radius: 6px; }
-#rs-images .wf-redline { position: absolute; left: 0; right: 0; height: 2px; background: #F57D15; pointer-events: none; transition: top 0.05s linear; }
+#rs-images .wf-redline { position: absolute; left: 0; right: 0; height: 2px; background: var(--color-accent); pointer-events: none; transition: top 0.05s linear; }
 
 #rs-images .sbp-container { position: relative; margin-top: 8px; }
 #rs-images .sbp-container img { width: 100%; display: block; border: 2px solid #E1F3F8; border-radius: 6px; }
-#rs-images .sbp-redline { position: absolute; top: 0; bottom: 0; width: 2px; background: #F57D15; pointer-events: none; transition: left 0.05s linear; }
+#rs-images .sbp-redline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--color-accent); pointer-events: none; transition: left 0.05s linear; }
