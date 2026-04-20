@@ -438,14 +438,14 @@ function showWaterfallSidebar(feature) {
     
     if (props.instrument === 'SSS') {
         openPanels('sss');
-        document.getElementById('rp-title').textContent = `SSS Viewer`;
+        document.getElementById('rp-title').textContent = `SSS Viewer - ${filename || 'Unknown'}`;
         document.getElementById('rp-echarts-cursor')?.classList.remove('hidden');
         if (waterfallIndex.sss[`${filename}_HF`]) document.getElementById('img-hf').src = `/waterfalls/${waterfallIndex.sss[`${filename}_HF`].image}`;
         setSSSMode('hf'); 
         loadProfileData('rp', currentTrackCoords);
     } else if (props.instrument === 'SBP') {
         openPanels('sbp');
-        document.getElementById('bp-title').textContent = `SBP Viewer`;
+        document.getElementById('bp-title').textContent = `SBP Viewer - ${filename || 'Unknown'}`;
         document.getElementById('bp-echarts-cursor')?.classList.remove('hidden');
         if (waterfallIndex.sbp[filename]) {
             document.getElementById('bp-sbp-image').src = `/waterfalls/${waterfallIndex.sbp[filename].image}`;
