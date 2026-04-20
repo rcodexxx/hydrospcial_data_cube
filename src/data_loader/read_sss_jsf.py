@@ -135,9 +135,6 @@ def read_sss_jsf(jsf_file_path, verbose=False):
                     heave_m = struct.unpack_from("<f", pay, 48)[0]
 
                 pitch, roll = np.nan, np.nan
-                if validity & (1 << 5):
-                    pitch = struct.unpack_from("<f", pay, 156)[0]
-                    roll = struct.unpack_from("<f", pay, 160)[0]
 
                 # msg=80 heading
                 heading = np.nan
