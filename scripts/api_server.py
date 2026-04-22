@@ -54,31 +54,37 @@ SEDIMENT_LABELS = [
 # ── Layer definitions ────────────────────────────────────────
 TILE_LAYERS = {
     "bathymetry": {
-        "tif": "mbes_bathymetry.tif", 
+        "tif": "mbes_bathymetry.tif",
         "label": "Bathymetry",
         "palette": "turbo_r"
     },
-    "imagery_lf": {
-        "tif": "sss_imagery_lf.tif", 
-        "label": "SSS Imagery LF",
-        "palette": "copper"
-    },
     "imagery_hf": {
-        "tif": "sss_imagery_hf.tif", 
-        "label": "SSS Imagery HF",
+        "tif": "sss_backscatter_hf.tif",
+        "label": "SSS Backscatter HF",
         "palette": "copper"
     },
-        "sediment_class": {
-        "tif": "sbp_sediment_rgb.tif", 
+    "sediment_class": {
+        "tif": "sbp_sediment_rgb.tif",
         "label": "Sediment Class",
-        "palette": None 
+        "palette": None
     },
     "mag_residual": {
-        "tif": "mag_residual.tif", 
+        "tif": "mag_residual.tif",
         "label": "Magnetic Residual",
         "palette": "rdbu"
     },
 }
+
+def _get_percentile_range(tif_path, low=2, high=98):
+    with rasterio.open(tif_path) as src:
+        data = src.read(1).astype(np.float32)
+        nd = src.nodata
+        if nd is not None:
+            data[data == nd] = np.nan
+        valid = data[np.isfinite(data)]
+        if len(valid) == 0:
+            return None, None
+        return float(np.percentile(valid, low)), float(np.percentile(valid, high))
 
 # ── Load NC ──────────────────────────────────────────────────
 ds = xr.open_dataset(NC_PATH)
@@ -93,22 +99,26 @@ for key, cfg in TILE_LAYERS.items():
     if tif_path.exists():
         client = TileClient(str(tif_path))
         url_kwargs = {}
-        
+
         if cfg.get("palette"):
             url_kwargs["colormap"] = cfg["palette"]
+            vmin, vmax = _get_percentile_range(tif_path)
+            if vmin is not None:
+                url_kwargs["vmin"] = vmin
+                url_kwargs["vmax"] = vmax
         else:
             url_kwargs["vmin"] = 0
             url_kwargs["vmax"] = 255
-        
+
         native_nodata = client.dataset.nodata
         if native_nodata is not None:
             url_kwargs["nodata"] = native_nodata
 
         colored_url = client.get_tile_url(**url_kwargs)
-        
+
         tile_clients[key] = {
             "client": client,
-            "url": colored_url, 
+            "url": colored_url,
             "label": cfg["label"],
             "center": client.center(),
             "bounds": client.bounds(),

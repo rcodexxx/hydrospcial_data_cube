@@ -28,6 +28,37 @@ const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.control.scale({ position: 'bottomright', metric: true, imperial: false }).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri', maxZoom: 18, maxNativeZoom: 18 }).addTo(map);
+function createGraticule(interval = 0.05) {
+    const lines = [];
+    const bounds = map.getBounds().pad(0.1);
+    
+    // 經線
+    for (let lon = Math.floor(bounds.getWest() / interval) * interval; 
+             lon <= bounds.getEast(); lon += interval) {
+        lines.push(L.polyline(
+            [[bounds.getSouth(), lon], [bounds.getNorth(), lon]],
+            {color: '#ffffff', weight: 0.5, opacity: 0.5, interactive: false}
+        ));
+    }
+    // 緯線
+    for (let lat = Math.floor(bounds.getSouth() / interval) * interval; 
+             lat <= bounds.getNorth(); lat += interval) {
+        lines.push(L.polyline(
+            [[lat, bounds.getWest()], [lat, bounds.getEast()]],
+            {color: '#ffffff', weight: 0.5, opacity: 0.5, interactive: false}
+        ));
+    }
+    return L.layerGroup(lines);
+}
+
+let graticuleLayer = createGraticule(0.05);
+graticuleLayer.addTo(map);
+
+map.on('moveend zoomend', () => {
+    map.removeLayer(graticuleLayer);
+    graticuleLayer = createGraticule(0.05);
+    graticuleLayer.addTo(map);
+});
 
 // 載入網格影像圖層
 fetch(API + '/api/layers').then(r => r.json()).then(data => {
