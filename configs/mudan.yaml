@@ -1,0 +1,42 @@
+# Mudan reservoir survey
+grid:
+  epsg: 3826
+  resolution: 0.5
+  bounds:
+    left: 227173.5
+    right: 228429.5
+    bottom: 2448218.0
+    top: 2449210.5
+
+environment:
+  sound_speed: 1489.073    # fresh water at 25°C
+
+mbes:
+  source: data/multibeam/G1m_142m.txt
+  out_tif: outputs/tif/mbes_bathymetry.tif
+
+sss:
+  channels: [HF_port, HF_stbd]    # swap to [LF_port, LF_stbd] for LF
+
+  survey_dirs:
+    - path: data/sss/20251223
+      cable_length: 15.0
+    - path: data/sss/20251224
+      cable_length: null
+
+  outputs:
+    bs_tif: outputs/tif/sss_backscatter_hf.tif
+    lbl_tif: outputs/tif/sss_clusters_hf.tif
+    validation_dir: outputs/sss_validation/hf
+
+  cluster:
+    method: kmeans
+    k_init: 8
+
+sbp:
+  calibration_constant: 1.642613e8
+  survey_dirs:
+    - path: data/sbp/20251223
+    - path: data/sbp/20251224
+  outputs:
+    tif: outputs/tif/sbp_isopach.tif

@@ -191,19 +191,20 @@ function applyLayout() {
         mapWrapper.style.right = currentRightWidth > 0 ? `${currentRightWidth}px` : '0px';
         mapWrapper.style.bottom = currentBottomHeight > 0 ? `${currentBottomHeight}px` : '0px';
     }
+}
 
-    setTimeout(() => {
-        if (window.map) map.invalidateSize({animate: true});
-        const bpChart = document.getElementById('bp-echarts-container');
-        const rpChart = document.getElementById('rp-echarts-container');
-        if (bpChart && bpChart._chart) bpChart._chart.resize();
-        if (rpChart && rpChart._chart) rpChart._chart.resize();
-    }, 300);
+function resizeCanvases() {
+    if (window.map) map.invalidateSize({animate: false}); // animate: false 避免閃爍
+    const bpChart = document.getElementById('bp-echarts-container');
+    const rpChart = document.getElementById('rp-echarts-container');
+    if (bpChart && bpChart._chart) bpChart._chart.resize();
+    if (rpChart && rpChart._chart) rpChart._chart.resize();
 }
 
 document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
     isSidebarOpen = !isSidebarOpen;
     applyLayout();
+    setTimeout(resizeCanvases, 300);
 });
 
 window.closePanels = function() {
@@ -301,7 +302,19 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
         mapDiv.classList.remove('cursor-pan', 'cursor-query', 'cursor-line', 'cursor-select');
         mapDiv.classList.add(`cursor-${currentTool}`);
         
-        currentTool === 'pan' ? map.dragging.enable() : map.dragging.disable();
+        if (currentTool === 'pan') {
+            map.dragging.enable();
+            map.touchZoom.enable();
+            map.doubleClickZoom.enable();
+            map.scrollWheelZoom.enable();
+            map.boxZoom.enable();
+        } else {
+            map.dragging.disable();
+            map.touchZoom.disable();
+            map.doubleClickZoom.disable();
+            map.scrollWheelZoom.disable();
+            map.boxZoom.disable();
+        }
     });
 });
 
@@ -759,8 +772,22 @@ document.getElementById('chk-trackline-sbp')?.addEventListener('change', (e) => 
 
 // ── 10. 面板拖曳邏輯 ───────────────────────────────────────
 let resizeTarget = null; 
-document.getElementById('rp-resizer')?.addEventListener('mousedown', () => { resizeTarget = 'right'; document.body.style.cursor = 'col-resize'; mapWrapper.style.transition = 'none'; });
-document.getElementById('bp-resizer')?.addEventListener('mousedown', () => { resizeTarget = 'bottom'; document.body.style.cursor = 'row-resize'; mapWrapper.style.transition = 'none'; });
+document.getElementById('rp-resizer')?.addEventListener('mousedown', () => { 
+    resizeTarget = 'right'; 
+    document.body.style.cursor = 'col-resize'; 
+    document.body.classList.add('select-none'); // 防止反白文字
+    // 移除過渡動畫，讓拖曳「完全跟手」
+    rightPanel.style.transition = 'none'; 
+    mapWrapper.style.transition = 'none'; 
+});
+
+document.getElementById('bp-resizer')?.addEventListener('mousedown', () => { 
+    resizeTarget = 'bottom'; 
+    document.body.style.cursor = 'row-resize'; 
+    document.body.classList.add('select-none');
+    bottomPanel.style.transition = 'none';
+    mapWrapper.style.transition = 'none'; 
+});
 document.getElementById('rp-internal-resizer')?.addEventListener('mousedown', () => { resizeTarget = 'rp-internal'; document.body.style.cursor = 'row-resize'; document.body.classList.add('no-select'); });
 document.getElementById('bp-internal-resizer')?.addEventListener('mousedown', () => { resizeTarget = 'bp-internal'; document.body.style.cursor = 'row-resize'; document.body.classList.add('no-select'); });
 window.addEventListener('mousemove', (e) => {
@@ -772,12 +799,19 @@ window.addEventListener('mousemove', (e) => {
 });
 window.addEventListener('mouseup', () => {
     if (resizeTarget) {
-        resizeTarget = null; document.body.style.cursor = ''; document.body.classList.remove('no-select');
-        mapWrapper.style.transition = 'left 0.3s, right 0.3s, bottom 0.3s ease-in-out';
+        resizeTarget = null; 
+        document.body.style.cursor = ''; 
+        document.body.classList.remove('select-none');
+
+        rightPanel.style.transition = 'transform 0.3s ease-in-out';
+        bottomPanel.style.transition = 'transform 0.3s ease-in-out';
+        mapWrapper.style.transition = 'all 0.3s ease-in-out';
+
         map.invalidateSize({animate: false});
         document.getElementById('bp-slider')?.dispatchEvent(new Event('input'));
         document.getElementById('rp-slider')?.dispatchEvent(new Event('input'));
     }
+    resizeCanvases();
 });
 
 // ── 11. Three.js 虛擬岩心 (Virtual Borehole) ────────────────

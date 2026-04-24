@@ -5,7 +5,7 @@ import numpy as np
 from pyproj import Transformer
 
 from src.data_loader.read_sbp_jsf import read_sbp_jsf
-from src.data_loader.read_sss_jsf import read_sss_jsf
+from src.sss.read_sss_jsf import read_sss_jsf
 
 ROOT = Path(".")
 OUT = ROOT / "outputs" / "tracklines.json"

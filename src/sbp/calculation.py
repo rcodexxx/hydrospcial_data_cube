@@ -10,17 +10,16 @@ SAMPLE_DEPTH = 20480e-9 * SOUND_SPEED / 2  # 0.015247 m/sample
 Z_WATER = 1000 * SOUND_SPEED  # Pa·s/m
 
 SEDIMENT_THRESHOLDS = [
-    (7.33, "Coarse sand"),  # 0: RL < 7.33
-    (8.02, "Fine sand"),  # 1: RL < 8.02
-    (8.73, "Very fine sand"),  # 2: RL < 8.73
-    (9.63, "Silty sand"),  # 3: RL < 9.63
-    (9.82, "Sandy silt"),  # 4: RL < 9.82
-    (10.25, "Silt"),  # 5: RL < 10.25
-    (11.98, "Sandy-silt-clay"),  # 6: RL < 11.98
-    (13.20, "Silty clay"),
-    (13.37, "Clayey silt"),  # 7: RL < 13.37
-    (23.95, "Framework-supported mud"),  # 8: RL < 22.40 (過渡態壓實軟泥, 孔隙率 < 90%)
-    (float("inf"), "Fluid mud"),  # 9: RL >= 23.95 (懸浮態流體泥, 孔隙率 >= 90%)
+    (7.33,         "Coarse sand"),
+    (8.02,         "Fine sand"),
+    (8.73,         "Very fine sand"),
+    (9.63,         "Silty sand"),
+    (9.82,         "Sandy silt"),
+    (10.25,        "Silt"),
+    (11.98,        "Sandy-silt-clay"),
+    (13.37,        "Clayey silt/Silty clay"),
+    (23.95,        "Compacted mud"),       
+    (float("inf"), "Fluid mud"),               
 ]
 
 SEDIMENT_LABELS = [label for _, label in SEDIMENT_THRESHOLDS]
@@ -200,3 +199,23 @@ def _find_longest_run(bool_arr):
         else:
             cur_s, cur_n = i + 1, 0
     return best_s, best_s + best_n
+
+
+def compute_rl_batch(amps_2d, cc, blanking=50):
+    """一次處理所有ping，回傳RL array。"""
+    n_pings = amps_2d.shape[0]
+    rl = np.full(n_pings, np.nan, dtype=np.float64)
+
+    if cc <= 0 or amps_2d.shape[1] < 100:
+        return rl
+
+    search = amps_2d[:, blanking:]
+    idx_b = np.argmax(search, axis=1) + blanking
+    amp_b = amps_2d[np.arange(n_pings), idx_b]
+
+    valid = amp_b > 0
+    R = np.where(valid, (idx_b * amp_b) / cc, 0.0)
+    valid &= R > 0
+
+    rl[valid] = np.clip(-20.0 * np.log10(R[valid]), RL_MIN, RL_MAX)
+    return rl

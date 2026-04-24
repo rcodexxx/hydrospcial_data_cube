@@ -1,29 +1,26 @@
-# scripts/plot/plot_backscatter.py
-from pathlib import Path
+"""
+Render SSS mosaic GeoTIFFs as publication-quality figures.
 
-import matplotlib.colors as mcolors
+Reads bs_tif and lbl_tif produced by build_sss_backscatter.py,
+outputs two PNGs (backscatter + cluster label map).
+
+Usage:
+    python scripts/plot/plot_backscatter.py --config configs/mudan.yaml
+    python scripts/plot/plot_backscatter.py --config configs/mudan.yaml --mode global_arc
+"""
+import argparse
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import rasterio
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyproj import Transformer
-from scipy.ndimage import median_filter
 
-from src.config import ROOT
-
-# ─── 定義檔案路徑 ───
-MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-BS_TIF = ROOT / "outputs/tif/sss_backscatter_lf.tif"
-LBL_TIF = ROOT / "outputs/tif/sss_clusters_lf.tif" 
-
-OUT_BS_FIG = ROOT / "outputs/figures/sss_backscatter_lf.png"
-OUT_LBL_FIG = ROOT / "outputs/figures/sss_clusters_lf.png" 
-
-N_CLUSTERS = 5
+from src.config import ROOT, get_config
 
 
-def load_tif(path, nodata=None):
+def _load_tif(path, nodata=None):
     with rasterio.open(path) as src:
         data = src.read(1).astype(np.float32)
         nd = src.nodata if nodata is None else nodata
@@ -32,17 +29,18 @@ def load_tif(path, nodata=None):
         return data, src.bounds, src.crs
 
 
-def setup_ax(ax, bounds, tr):
+def _setup_latlon_axes(ax, bounds, tr_to_wgs84):
+    """Format axis ticks as decimal-minute lat/lon."""
     mid_x = (bounds.left + bounds.right) / 2
     mid_y = (bounds.bottom + bounds.top) / 2
 
     def fmt_lon(val, _):
-        lon, _ = tr.transform(val, mid_y)
+        lon, _ = tr_to_wgs84.transform(val, mid_y)
         d, m = int(abs(lon)), (abs(lon) % 1) * 60
         return f"{d}°{m:05.2f}′{'E' if lon >= 0 else 'W'}"
 
     def fmt_lat(val, _):
-        _, lat = tr.transform(mid_x, val)
+        _, lat = tr_to_wgs84.transform(mid_x, val)
         d, m = int(abs(lat)), (abs(lat) % 1) * 60
         return f"{d}°{m:05.2f}′{'N' if lat >= 0 else 'S'}"
 
@@ -50,108 +48,114 @@ def setup_ax(ax, bounds, tr):
     ax.set_yticks(np.linspace(bounds.bottom, bounds.top, 4))
     ax.xaxis.set_major_formatter(mticker.FuncFormatter(fmt_lon))
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(fmt_lat))
-    ax.tick_params(axis="x", labelsize=7)
-    ax.tick_params(axis="y", labelsize=7)
+    ax.tick_params(axis="both", labelsize=7)
     ax.grid(True, color="white", linewidth=0.4, alpha=0.5, linestyle="--")
 
 
-def render_plot(data, bounds, tr, out_path, title, plot_type="bs"):
+def _render(data, bounds, tr_to_wgs84, out_path, title, plot_type, n_clusters=None):
+    """Render one figure. plot_type: 'bs' or 'cluster'."""
     fig, ax = plt.subplots(figsize=(10, 8))
     extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
 
-    valid_mask = ~np.isnan(data)
-    if not valid_mask.any():
-        print(f"Warning: No valid data to plot for {title}")
+    valid = ~np.isnan(data)
+    if not valid.any():
+        print(f"  skip: no valid data for {title}")
+        plt.close(fig)
         return
 
     if plot_type == "cluster":
-        plot_data = data
-        cmap = plt.get_cmap("tab10", N_CLUSTERS)
-        plot_vmin, plot_vmax = -0.5, N_CLUSTERS - 0.5
+        cmap = plt.get_cmap("tab10", n_clusters)
+        vmin, vmax = -0.5, n_clusters - 0.5
         cbar_label = "Acoustic Facies (Cluster ID)"
-
+        cbar_ticks = range(n_clusters)
     else:
-        # 畫背向散射圖：擷取 2% ~ 98% 避免極端雜訊影響對比度
-        vmin, vmax = np.percentile(data[valid_mask], [2, 98])
-        plot_data = data
+        vmin, vmax = np.percentile(data[valid], [2, 98])
         cmap = "copper"
-        plot_vmin, plot_vmax = vmin, vmax
-        cbar_label = "Absolute Backscatter Strength (dB)"
+        cbar_label = "Backscatter Strength (dB)"
+        cbar_ticks = None
 
     im = ax.imshow(
-        plot_data,
-        cmap=cmap,
-        origin="upper",
-        aspect="equal",
-        extent=extent,
-        vmin=plot_vmin,
-        vmax=plot_vmax,
-        interpolation="none" # 確保分類圖邊緣銳利
+        data, cmap=cmap, origin="upper", aspect="equal", extent=extent,
+        vmin=vmin, vmax=vmax, interpolation="none",
     )
 
     div = make_axes_locatable(ax)
     cax = div.append_axes("right", size="4%", pad=0.05)
-
-    if plot_type == "cluster":
-        cbar = plt.colorbar(im, cax=cax, label=cbar_label, ticks=range(N_CLUSTERS))
-    else:
-        cbar = plt.colorbar(im, cax=cax, label=cbar_label)
+    plt.colorbar(im, cax=cax, label=cbar_label, ticks=cbar_ticks)
 
     ax.set_title(title, fontsize=14, fontweight="bold")
-    setup_ax(ax, bounds, tr)
+    _setup_latlon_axes(ax, bounds, tr_to_wgs84)
     plt.tight_layout()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    print(f"✅ Successfully rendered and saved: {out_path.name}")
+    print(f"  saved: {out_path.relative_to(ROOT)}")
+
+
+def _resolve_paths(mode):
+    """Resolve tif / output png paths for the given mode."""
+    cfg = get_config()
+    sss_cfg = cfg["sss"]
+
+    bs_tif  = ROOT / sss_cfg["outputs"]["bs_tif"]
+    lbl_tif = ROOT / sss_cfg["outputs"]["lbl_tif"]
+    if mode != "full":
+        bs_tif  = bs_tif.with_stem(bs_tif.stem + f"_{mode}")
+        lbl_tif = lbl_tif.with_stem(lbl_tif.stem + f"_{mode}")
+
+    fig_dir = ROOT / "outputs/figures"
+    bs_png  = fig_dir / f"{bs_tif.stem}.png"
+    lbl_png = fig_dir / f"{lbl_tif.stem}.png"
+
+    # Derive frequency label (hf/lf) from filename for title text
+    freq = "HF" if "hf" in bs_tif.stem.lower() else "LF"
+    return bs_tif, lbl_tif, bs_png, lbl_png, freq
 
 
 def main():
-    dem, bounds, crs = load_tif(MBES_TIF)
-    tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=False)
+    parser.add_argument("--mode", default="full",
+                        choices=["full", "global_arc", "raw"])
+    args = parser.parse_args()
 
-    # 1. 輸出物理定標後的背向散射圖 (BS)
-    bs_data, _, _ = load_tif(BS_TIF, nodata=-9999.0)
-    
-    # 🌟 記住 SSS 本身的真實範圍
-    valid_bs_mask = ~np.isnan(bs_data) 
-    
-    bs_filled = np.nan_to_num(bs_data, nan=np.nanmean(bs_data[valid_bs_mask]))
-    bs_smoothed = median_filter(bs_filled, size=3) 
-    
-    # 🌟 濾波完後，只保留 SSS 真正有掃到的地方
-    bs_data = np.where(valid_bs_mask, bs_smoothed, np.nan) 
-    
-    render_plot(
-        bs_data,
-        bounds,
-        tr,
-        OUT_BS_FIG,
-        "Mudan Reservoir - Calibrated SSS Backscatter (HF)",
+    bs_tif, lbl_tif, bs_png, lbl_png, freq = _resolve_paths(args.mode)
+
+    if not bs_tif.exists():
+        raise FileNotFoundError(
+            f"{bs_tif} not found. Run build_sss_backscatter.py --mode {args.mode} first."
+        )
+
+    _, _, crs = _load_tif(bs_tif, nodata=-9999.0)
+    tr_to_wgs84 = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+
+    # Mode suffix for titles
+    mode_suffix = {"full": "", "global_arc": " (Global ARC)", "raw": " (Raw)"}[args.mode]
+
+    # Backscatter
+    print("Rendering backscatter...")
+    bs_data, bounds, _ = _load_tif(bs_tif, nodata=-9999.0)
+    _render(
+        bs_data, bounds, tr_to_wgs84, bs_png,
+        title=f"Calibrated SSS Backscatter ({freq}){mode_suffix}",
         plot_type="bs",
     )
 
-    # 2. 輸出 K-means 分類分佈圖 (Clusters)
-    lbl_data, _, _ = load_tif(LBL_TIF, nodata=255)
-    
-    # 🌟 記住 SSS 分類圖的真實範圍
-    valid_lbl_mask = ~np.isnan(lbl_data)
-    
-    lbl_filled = np.nan_to_num(lbl_data, nan=255)
-    lbl_smoothed = median_filter(lbl_filled, size=7) 
-    
-    # 🌟 濾波完後，只保留 SSS 真正有掃到的地方
-    lbl_data = np.where(valid_lbl_mask, lbl_smoothed, np.nan)
-    
-    render_plot(
-        lbl_data,
-        bounds,
-        tr,
-        OUT_LBL_FIG,
-        f"Mudan Reservoir - Acoustic Facies (HF, K={N_CLUSTERS})",
-        plot_type="cluster",
-    )
+    # Clusters — only meaningful for full mode
+    if args.mode == "full" and lbl_tif.exists():
+        print("Rendering clusters...")
+        lbl_data, _, _ = _load_tif(lbl_tif, nodata=255)
+        valid = ~np.isnan(lbl_data)
+        if valid.any():
+            n_clusters = int(lbl_data[valid].max()) + 1
+            _render(
+                lbl_data, bounds, tr_to_wgs84, lbl_png,
+                title=f"Acoustic Facies ({freq}, K={n_clusters})",
+                plot_type="cluster",
+                n_clusters=n_clusters,
+            )
+
 
 if __name__ == "__main__":
     main()
