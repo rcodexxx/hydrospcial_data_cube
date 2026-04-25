@@ -1,44 +1,29 @@
-# scripts/build/build_datacube.py
 """
 Pack all GeoTIFF layers into a single NetCDF4 data cube.
-Resamples all layers to the MBES reference grid before packing.
+Layers are resampled to the reference grid (typically MBES bathymetry).
+
+Layer registry is yaml-driven: see cube.layers in configs/<site>.yaml.
+Each layer must specify a path (relative to repo ROOT).
 """
-from pathlib import Path
 import numpy as np
 import rasterio
+import xarray as xr
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
-import xarray as xr
 
-ROOT    = Path(__file__).parent.parent.parent
-TIF_DIR = ROOT / "outputs/tif"
-OUT_NC  = ROOT / "outputs/hydrospatial_datacube.nc"
-
-# (filename, variable_name, units, description, dtype)
-LAYERS = [
-    # MBES
-    ("mbes_bathymetry.tif",    "bathymetry",      "m",      "Water depth (positive down)",              "float32"),
-    ("mbes_vrm.tif",           "vrm",             "",       "Vector Ruggedness Measure",                "float32"),
-    # SSS
-    ("sss_backscatter_lf.tif", "bs_lf",           "dB",     "SSS backscatter 230 kHz",                 "float32"),
-    ("sss_backscatter_hf.tif", "bs_hf",           "dB",     "SSS backscatter 850 kHz",                 "float32"),
-    ("sss_clusters_hf.tif",    "facies_hf",       "",       "Acoustic facies HF (K-means cluster ID)", "uint8"),
-    ("sss_clusters_lf.tif",    "facies_lf",       "",       "Acoustic facies LF (K-means cluster ID)", "uint8"),
-    # SBP
-    ("sbp_rl.tif",             "rl",              "dB",     "Reflection Loss",                          "float32"),
-    ("sbp_sediment_class.tif", "sediment_class",  "",       "Hamilton sediment classification (int8)",  "int8"),
-    ("sbp_isopach.tif",        "isopach",         "m",      "Sediment thickness",                       "float32"),
-    ("sbp_confidence.tif",     "sbp_confidence",  "",       "SBP confidence: 0=measured 1=interp",      "uint8"),
-    # MAG
-    ("mag_background.tif",     "mag_background",  "nT",     "Magnetic background field (IGRF residual)","float32"),
-    ("mag_residual.tif",       "mag_residual",    "nT",     "Magnetic local anomaly",                   "float32"),
-    ("mag_confidence.tif",     "mag_confidence",  "",       "MAG confidence: 0=measured 1=interp",      "uint8"),
-]
+from src.config import get_config, ROOT
 
 
-def resample_to_ref(src_path, ref_transform, ref_crs, ref_height, ref_width,
-                    resampling=Resampling.bilinear):
-    """Reproject and resample a TIF to the reference grid."""
+# ──────────────────────────────────────────────────────────
+# Categorical nodata sentinels (must match writer conventions)
+# ──────────────────────────────────────────────────────────
+NODATA_UINT8 = 255
+NODATA_INT8 = -1
+
+
+def resample_to_ref(src_path, ref_transform, ref_crs,
+                    ref_height, ref_width, resampling):
+    """Reproject and resample a GeoTIFF onto the reference grid."""
     with rasterio.open(src_path) as src:
         data = np.full((ref_height, ref_width), np.nan, dtype=np.float32)
         reproject(
@@ -55,89 +40,96 @@ def resample_to_ref(src_path, ref_transform, ref_crs, ref_height, ref_width,
     return data
 
 
+def categorical_to_float(arr, dtype):
+    """Replace categorical nodata sentinels with NaN."""
+    out = arr.astype(np.float32)
+    if dtype == "uint8":
+        out[out == NODATA_UINT8] = np.nan
+    elif dtype == "int8":
+        out[out == NODATA_INT8] = np.nan
+    return out
+
+
 def main():
-    # reference grid from bathymetry
-    ref_path = TIF_DIR / "mbes_bathymetry.tif"
+    cfg = get_config()
+    cube_cfg = cfg["cube"]
+
+    ref_path = ROOT / cube_cfg["reference_grid"]
+    out_nc = ROOT / cube_cfg["output"]
+
     with rasterio.open(ref_path) as src:
         ref_transform = src.transform
-        ref_crs       = src.crs
-        ref_height    = src.height
-        ref_width     = src.width
-        ref_res       = src.transform.a
+        ref_crs = src.crs
+        ref_height, ref_width = src.height, src.width
+        ref_res = src.transform.a
 
-    xs = ref_transform.c + (np.arange(ref_width)  + 0.5) * ref_res
+    xs = ref_transform.c + (np.arange(ref_width) + 0.5) * ref_res
     ys = ref_transform.f + (np.arange(ref_height) + 0.5) * (-ref_res)
 
     ds = xr.Dataset(
         coords={
-            "y": ("y", ys, {"units": "m", "long_name": "Northing EPSG:3826"}),
-            "x": ("x", xs, {"units": "m", "long_name": "Easting EPSG:3826"}),
+            "y": ("y", ys, {"units": "m", "long_name": f"Northing {ref_crs}"}),
+            "x": ("x", xs, {"units": "m", "long_name": f"Easting {ref_crs}"}),
         },
         attrs={
-            "title":       "Hydrospatial Data Cube — Mudan Reservoir",
-            "crs":         str(ref_crs),
+            "title": "Hydrospatial Data Cube",
+            "crs": str(ref_crs),
             "resolution_m": ref_res,
             "conventions": "CF-1.8",
         },
     )
 
-    print("Building NetCDF Data Cube...")
+    print(f"Reference grid: {ref_height}x{ref_width} @ {ref_res} m/px")
+    print(f"Building data cube -> {out_nc.name}\n")
+
     skipped = []
-    for filename, varname, units, desc, dtype in LAYERS:
-        tif_path = TIF_DIR / filename
-        if not tif_path.exists():
-            print(f"  SKIP : {filename}")
-            skipped.append(filename)
+    for layer in cube_cfg["layers"]:
+        var = layer["var"]
+        src_path = ROOT / layer["path"]
+
+        if not src_path.exists():
+            print(f"  SKIP  {var:18s}  ({src_path.name} not found)")
+            skipped.append(var)
             continue
 
-        # categorical layers use nearest-neighbour resampling
-        if dtype in ("uint8", "int8"):
-            resamp = Resampling.nearest
-        else:
-            resamp = Resampling.bilinear
+        resamp = (Resampling.nearest if layer["kind"] == "categorical"
+                  else Resampling.bilinear)
+        arr = resample_to_ref(src_path, ref_transform, ref_crs,
+                              ref_height, ref_width, resampling=resamp)
 
-        data = resample_to_ref(tif_path, ref_transform, ref_crs,
-                               ref_height, ref_width, resampling=resamp)
+        if layer["kind"] == "categorical":
+            arr = categorical_to_float(arr, layer["dtype"])
 
-        # restore integer nodata as nan not applicable → use masked array
-        if dtype == "uint8":
-            arr = data.astype(np.float32)
-            arr[arr == 255] = np.nan
-        elif dtype == "int8":
-            arr = data.astype(np.float32)
-            arr[arr == -1]  = np.nan
-        else:
-            arr = data
-
-        ds[varname] = xr.DataArray(
+        ds[var] = xr.DataArray(
             arr, dims=["y", "x"],
-            attrs={"units": units, "long_name": desc},
+            attrs={
+                "units": layer["units"],
+                "long_name": layer["desc"],
+                "source": str(src_path.relative_to(ROOT)),
+                "kind": layer["kind"],
+            },
         )
-        print(f"  Added: {varname:20s} ({filename})")
+        print(f"  Added {var:18s}  ({src_path.name})")
 
-    ds.to_netcdf(OUT_NC, engine="netcdf4")
+    ds.to_netcdf(out_nc, engine="netcdf4")
 
-    print(f"\nSaved: {OUT_NC}")
-    print(f"Layers  : {len(ds.data_vars)}")
-    print(f"Grid    : {ref_height} x {ref_width} px  ({ref_res} m/px)")
-    print(f"Size    : {OUT_NC.stat().st_size / 1e6:.1f} MB")
-
+    print(f"\nSaved: {out_nc.relative_to(ROOT)}")
+    print(f"  Layers : {len(ds.data_vars)}")
+    print(f"  Size   : {out_nc.stat().st_size / 1e6:.1f} MB")
     if skipped:
-        print(f"\nSkipped : {skipped}")
+        print(f"  Skipped: {skipped}")
 
-    # summary statistics
     print("\nLayer statistics:")
-    print(f"  {'Variable':<20} {'min':>10} {'median':>10} {'max':>10} {'coverage':>10}")
+    print(f"  {'variable':<18} {'min':>10} {'median':>10} {'max':>10} {'coverage':>10}")
     print("  " + "-" * 62)
-    for varname in ds.data_vars:
-        v = ds[varname].values
+    total = ref_height * ref_width
+    for var in ds.data_vars:
+        v = ds[var].values
         v = v[np.isfinite(v)]
-        if len(v) == 0:
+        if v.size == 0:
             continue
-        total = ref_height * ref_width
-        pct   = 100 * len(v) / total
-        print(f"  {varname:<20} {v.min():>10.2f} "
-              f"{np.median(v):>10.2f} {v.max():>10.2f} {pct:>9.1f}%")
+        print(f"  {var:<18} {v.min():>10.2f} {np.median(v):>10.2f} "
+              f"{v.max():>10.2f} {100*v.size/total:>9.1f}%")
 
 
 if __name__ == "__main__":

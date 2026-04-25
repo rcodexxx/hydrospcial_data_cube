@@ -19,7 +19,6 @@ import yaml
 
 ROOT = Path(__file__).parent.parent
 
-
 def _find_config_path() -> Path:
     # Peek at --config without consuming other args
     parser = argparse.ArgumentParser(add_help=False)
@@ -46,4 +45,4 @@ def _find_config_path() -> Path:
 
 @lru_cache(maxsize=1)
 def get_config() -> dict:
-    return yaml.safe_load(_find_config_path().read_text())
+    return yaml.safe_load(_find_config_path().read_text(encoding="utf-8"))

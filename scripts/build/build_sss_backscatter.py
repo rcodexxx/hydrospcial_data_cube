@@ -158,7 +158,7 @@ def main():
 
     cfg      = get_config()
     sss_cfg  = cfg["sss"]
-    mbes_tif = ROOT / cfg["mbes"]["out_tif"]
+    mbes_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
 
     bs_tif, lbl_tif = _make_output_paths(sss_cfg, args.mode)
 

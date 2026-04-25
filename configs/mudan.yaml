@@ -26,10 +26,8 @@ sss:
       cable_length: null
 
   outputs:
-    bs_hf_tif: outputs/tif/sss_backscatter_hf.tif
-    lbl_hf_tif: outputs/tif/sss_clusters_hf.tif
-    bs_lf_tif: outputs/tif/sss_backscatter_lf.tif
-    lbl_lf_tif: outputs/tif/sss_clusters_lf.tif
+    bs_tif: outputs/tif/sss_backscatter_hf.tif
+    lbl_tif: outputs/tif/sss_clusters_hf.tif
     validation_dir: outputs/sss_validation
 
   cluster:
@@ -63,3 +61,18 @@ mag:
     anomaly_tif:    outputs/tif/mag_anomaly.tif
     confidence_tif: outputs/tif/mag_confidence.tif
     targets_csv:    outputs/csv/mag_targets.csv 
+
+
+cube:
+  reference_grid: outputs/tif/mbes_bathymetry.tif    # which layer defines the grid
+  output: outputs/hydrospatial_datacube.nc
+  layers:
+    - { var: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      units: "m",  dtype: float32, kind: continuous,  desc: "Water depth (positive down)" }
+    - { var: vrm,            path: outputs/tif/mbes_vrm.tif,             units: "",   dtype: float32, kind: continuous,  desc: "Vector ruggedness measure" }
+    - { var: bs_lf,          path: outputs/tif/sss_backscatter_lf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 230 kHz (LF)" }
+    - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
+    - { var: facies_lf,      path: outputs/tif/sss_clusters_lf.tif,      units: "",   dtype: uint8,   kind: categorical, desc: "Acoustic facies, LF (K-means cluster ID)" }
+    - { var: facies_hf,      path: outputs/tif/sss_clusters_hf.tif,      units: "",   dtype: uint8,   kind: categorical, desc: "Acoustic facies, HF (K-means cluster ID)" }
+    - { var: rl,             path: outputs/tif/sbp_rl.tif,               units: "dB", dtype: float32, kind: continuous,  desc: "Reflection loss" }
+    - { var: sediment_class, path: outputs/tif/sbp_sediment_class.tif,   units: "",   dtype: int8,    kind: categorical, desc: "Hamilton sediment classification" }
+    - { var: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          units: "nT", dtype: float32, kind: continuous,  desc: "Magnetic anomaly (F - IGRF)" }
