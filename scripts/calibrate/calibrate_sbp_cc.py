@@ -1,46 +1,24 @@
-# scripts/calibrate/calibrate_sbp_cc.py
 """
 SBP Calibration Coefficient (CC) estimation.
 
-Automatically finds flat, uniform-substrate segments from SBP data,
-computes per-ping CC values, and selects the most stable segment
-to derive the final CC constant.
+Finds flat, uniform-substrate segments from SBP data, computes one CC
+per segment via ping-averaging (Huang & Liu 2015 method), and selects
+the cluster of consistent segments to derive the final CC.
 
-Output: prints the recommended CC value to set in src/config.py
-
-Methodology:
-  1. For each JSF file, sample VRM and depth at ping locations
-  2. Find consecutive runs of pings where VRM < threshold and
-     depth variation is small (flat, uniform bottom)
-  3. Compute per-ping CC using bottom echo (B) and
-     bottom-surface-bottom echo (BSB) ratio (Huang & Liu, 2015, Eq.6)
-  4. Rank segments by CC stability (coefficient of variation)
-  5. Select top segments and compute combined CC
-
-Reference:
-  Huang & Liu (2015) Eq.(6): CC = (r1*A1)^2 / (r2*A2)
+Writes the result to stdout; user should update
+configs/mudan.yaml sbp.calibration_constant.
 """
-
-from pathlib import Path
-
 import numpy as np
 import rasterio
 from pyproj import Transformer
 
-from src.data_loader.read_sbp_jsf import read_sbp_jsf
+from src.config import get_config, ROOT
+from src.sbp.read_sbp_jsf import read_sbp_jsf
 from src.sbp.calculation import estimate_cc
-
-ROOT = Path(__file__).parent.parent.parent
-SBP_PATH = ROOT / "data/sbp"
-MBES_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-VRM_TIF = ROOT / "outputs/tif/mbes_vrm.tif"
-
-# selection criteria
-MIN_CONSEC = 30  # minimum consecutive good pings
-VRM_THRESH = 0.002  # maximum VRM (low = flat)
-DEPTH_STD_THRESH = 0.5  # maximum depth std within segment (m)
-MIN_CC_COUNT = 10  # minimum valid CC estimates per segment
-TOP_N_SEGMENTS = 3  # number of best segments to combine
+from src.sbp.config import (
+    CC_MIN_CONSEC_PINGS, CC_VRM_PERCENTILE, CC_DEPTH_STD_MAX,
+    CC_TOP_N_SEGMENTS,
+)
 
 
 def sample_raster(tif_path, xs, ys):
@@ -72,164 +50,149 @@ def find_longest_run(bool_arr):
 
 
 def main():
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:3826", always_xy=True)
-    jsf_files = sorted(SBP_PATH.glob("*.jsf"))
+    cfg = get_config()
+    epsg = cfg["grid"]["epsg"]
+    mbes_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
+    vrm_tif = ROOT / cfg["mbes"]["vrm_tif"]
+    sbp_dirs = [ROOT / d["path"] for d in cfg["sbp"]["survey_dirs"]]
+
+    transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    jsf_files = []
+    for d in sbp_dirs:
+        jsf_files.extend(sorted(d.glob("*.jsf")))
 
     print("=" * 70)
     print("SBP Calibration Coefficient (CC) Estimation")
     print("=" * 70)
-    print(f"\nCriteria:")
-    print(f"  VRM            < {VRM_THRESH}")
-    print(f"  Depth std      < {DEPTH_STD_THRESH} m")
-    print(f"  Min consec.    >= {MIN_CONSEC} pings")
-    print(f"  Min CC samples >= {MIN_CC_COUNT}")
-    print(f"  JSF files      : {len(jsf_files)}")
+    print(f"JSF files      : {len(jsf_files)}")
+    print(f"Method         : Segment averaging (Huang & Liu 2015)")
+    print(f"Criteria:")
+    print(f"  VRM percentile < {CC_VRM_PERCENTILE}")
+    print(f"  Depth std      < {CC_DEPTH_STD_MAX} m")
+    print(f"  Min consec     >= {CC_MIN_CONSEC_PINGS} pings")
     print()
 
-    # scan all files for candidate segments
-    candidates = []
-
+    # Pool all VRM to determine threshold
+    print("Computing VRM threshold from full survey...")
+    all_vrm = []
     for jsf in jsf_files:
         data = read_sbp_jsf(jsf)
         if "SBP" not in data:
             continue
         d = data["SBP"]
         valid = ~np.isnan(d["lon"])
-        if valid.sum() < MIN_CONSEC:
+        if valid.sum() == 0:
+            continue
+        x, y = transformer.transform(d["lon"][valid], d["lat"][valid])
+        vrm = sample_raster(vrm_tif, x, y)
+        all_vrm.extend(vrm[np.isfinite(vrm)].tolist())
+
+    if not all_vrm:
+        print("ERROR: No valid VRM data found.")
+        return
+
+    vrm_thresh = float(np.percentile(all_vrm, CC_VRM_PERCENTILE))
+    print(f"VRM threshold  : {vrm_thresh:.5f} (percentile {CC_VRM_PERCENTILE})\n")
+
+    # Find candidate segments and compute one CC per segment
+    candidates = []
+    for jsf in jsf_files:
+        data = read_sbp_jsf(jsf)
+        if "SBP" not in data:
+            continue
+        d = data["SBP"]
+        valid = ~np.isnan(d["lon"])
+        if valid.sum() < CC_MIN_CONSEC_PINGS:
             continue
 
-        x, y = tr.transform(d["lon"][valid], d["lat"][valid])
-        vrm = sample_raster(VRM_TIF, x, y)
-        depth = sample_raster(MBES_TIF, x, y)
+        x, y = transformer.transform(d["lon"][valid], d["lat"][valid])
+        vrm = sample_raster(vrm_tif, x, y)
+        depth = sample_raster(mbes_tif, x, y)
 
-        good = np.isfinite(vrm) & (vrm < VRM_THRESH) & np.isfinite(depth)
+        good = np.isfinite(vrm) & (vrm < vrm_thresh) & np.isfinite(depth)
         start, length = find_longest_run(good)
-
-        if length < MIN_CONSEC:
+        if length < CC_MIN_CONSEC_PINGS:
             continue
 
-        seg_depth = depth[start : start + length]
-        seg_vrm = vrm[start : start + length]
+        seg_depth = depth[start:start + length]
+        seg_vrm = vrm[start:start + length]
         depth_std = np.nanstd(seg_depth)
-
-        if depth_std > DEPTH_STD_THRESH:
+        if depth_std > CC_DEPTH_STD_MAX:
             continue
 
-        # compute CC for this segment
         amps_valid = d["amps"][valid]
-        ccs = []
-        for i in range(start, start + length):
-            cc = estimate_cc(amps_valid[i])
-            if cc is not None and cc > 0:
-                ccs.append(cc)
-
-        if len(ccs) < MIN_CC_COUNT:
+        amps_segment = amps_valid[start:start + length]
+        cc = estimate_cc(amps_segment)
+        if cc is None or cc <= 0:
             continue
 
-        ccs = np.array(ccs)
-        # IQR outlier removal
-        q25, q75 = np.percentile(ccs, 25), np.percentile(ccs, 75)
-        iqr = q75 - q25
-        clean = ccs[(ccs >= q25 - 1.5 * iqr) & (ccs <= q75 + 1.5 * iqr)]
-
-        if len(clean) < MIN_CC_COUNT:
-            continue
-
-        cv = clean.std() / clean.mean() * 100
-
-        candidates.append(
-            {
-                "file": jsf.name,
-                "start": start,
-                "length": length,
-                "depth_mean": float(np.nanmean(seg_depth)),
-                "depth_std": depth_std,
-                "vrm_mean": float(np.nanmean(seg_vrm)),
-                "cc_median": float(np.median(clean)),
-                "cc_cv": cv,
-                "cc_count": len(clean),
-                "cc_values": clean,
-            }
-        )
+        candidates.append({
+            "file": jsf.name,
+            "start": start,
+            "length": length,
+            "depth_mean": float(np.nanmean(seg_depth)),
+            "depth_std": depth_std,
+            "vrm_mean": float(np.nanmean(seg_vrm)),
+            "cc": cc,
+            "cc_db": 20 * np.log10(cc),
+        })
 
     if not candidates:
         print("ERROR: No valid calibration segments found.")
-        print("Try relaxing criteria (increase VRM_THRESH or DEPTH_STD_THRESH).")
         return
 
-    # sort by CV (most stable first)
-    candidates.sort(key=lambda c: c["cc_cv"])
+    # Sort by stability (depth_std, then VRM)
+    candidates.sort(key=lambda c: (c["depth_std"], c["vrm_mean"]))
 
-    # print all candidates
-    print(f"Found {len(candidates)} candidate segments (sorted by stability):\n")
-    print(
-        f"{'#':>2s} {'File':<28s} {'Ping':>5s} {'Len':>4s} "
-        f"{'Depth':>6s} {'D_std':>5s} {'VRM':>8s} "
-        f"{'CC_dB':>7s} {'CV%':>6s} {'N':>4s}"
-    )
-    print("-" * 90)
-
+    print(f"Found {len(candidates)} candidate segments "
+          f"(sorted by depth stability):\n")
+    print(f"{'#':>2s} {'File':<28s} {'Ping':>5s} {'Len':>4s} "
+          f"{'Depth':>6s} {'D_std':>5s} {'VRM':>8s} {'CC_dB':>7s}")
+    print("-" * 76)
     for i, c in enumerate(candidates):
-        marker = " <--" if i < TOP_N_SEGMENTS else ""
-        print(
-            f"{i+1:2d} {c['file']:<28s} {c['start']:5d} {c['length']:4d} "
-            f"{c['depth_mean']:6.1f} {c['depth_std']:5.2f} "
-            f"{c['vrm_mean']:8.5f} "
-            f"{20*np.log10(c['cc_median']):7.1f} {c['cc_cv']:6.1f} "
-            f"{c['cc_count']:4d}{marker}"
-        )
+        marker = " <--" if i < CC_TOP_N_SEGMENTS else ""
+        print(f"{i + 1:2d} {c['file']:<28s} {c['start']:5d} {c['length']:4d} "
+              f"{c['depth_mean']:6.1f} {c['depth_std']:5.2f} "
+              f"{c['vrm_mean']:8.5f} {c['cc_db']:7.1f}{marker}")
 
-    # combine top segments
-    # collect all CC_dB values
-    all_cc_db = np.array([20 * np.log10(c["cc_median"]) for c in candidates])
-
-    # find the dominant cluster using median + MAD
+    # Cluster consistency check
+    all_cc_db = np.array([c["cc_db"] for c in candidates])
     median_db = np.median(all_cc_db)
     mad = np.median(np.abs(all_cc_db - median_db))
-    threshold = 3.0 * mad  # ~2 sigma equivalent
+    threshold = max(3.0 * mad, 3.0)
 
     consistent = [
-        c
-        for c, db in zip(candidates, all_cc_db)
-        if abs(db - median_db) <= max(threshold, 3.0)
+        c for c in candidates if abs(c["cc_db"] - median_db) <= threshold
     ]
-
     if not consistent:
-        print("WARNING: No consistent segments found, using all.")
+        print("WARNING: No consistent segments, using all.")
         consistent = candidates
 
-    # from consistent segments, pick top N by CV
-    consistent.sort(key=lambda c: c["cc_cv"])
-    top = consistent[:TOP_N_SEGMENTS]
+    consistent.sort(key=lambda c: (c["depth_std"], c["vrm_mean"]))
+    top = consistent[:CC_TOP_N_SEGMENTS]
 
-    print(
-        f"\nCC clustering: median={median_db:.1f} dB, MAD={mad:.1f} dB, "
-        f"threshold=±{max(threshold, 3.0):.1f} dB"
-    )
+    print(f"\nCC clustering: median={median_db:.1f} dB, MAD={mad:.1f} dB, "
+          f"threshold=±{threshold:.1f} dB")
     print(f"Consistent segments: {len(consistent)} / {len(candidates)}")
 
-    all_cc = np.concatenate([c["cc_values"] for c in top])
-    final_cc = float(np.median(all_cc))
-    final_cc_db = 20 * np.log10(final_cc)
-    combined_cv = all_cc.std() / all_cc.mean() * 100
+    top_cc_db = np.array([c["cc_db"] for c in top])
+    final_cc_db = float(np.median(top_cc_db))
+    final_cc = 10 ** (final_cc_db / 20)
+    inter_seg_std = float(np.std(top_cc_db))
 
     print(f"\n{'=' * 70}")
-    print(f"RESULT: Combined CC from top {TOP_N_SEGMENTS} segments")
+    print(f"RESULT: CC from top {len(top)} most stable segments")
     print(f"{'=' * 70}")
-    print(f"  CC         = {final_cc:.6e}")
-    print(f"  CC (dB)    = {final_cc_db:.2f} dB")
-    print(f"  Combined N = {len(all_cc)}")
-    print(f"  Combined CV= {combined_cv:.1f}%")
+    print(f"  CC              = {final_cc:.6e}")
+    print(f"  CC (dB)         = {final_cc_db:.2f} dB")
+    print(f"  Inter-segment σ = {inter_seg_std:.2f} dB")
     print(f"\n  Sources:")
     for c in top:
-        print(
-            f"    {c['file']} (ping {c['start']}-{c['start']+c['length']}, "
-            f"depth={c['depth_mean']:.1f}m, CV={c['cc_cv']:.1f}%)"
-        )
+        print(f"    {c['file']} (ping {c['start']}-{c['start'] + c['length']}, "
+              f"depth={c['depth_mean']:.1f}m, CC={c['cc_db']:.1f} dB)")
 
-    print(f"\n  Add to src/config.py:")
-    print(f"  SBP_CC = {final_cc:.6e}")
-    print()
+    print(f"\n  Update configs/mudan.yaml sbp.calibration_constant:")
+    print(f"  calibration_constant: {final_cc:.6e}")
 
 
 if __name__ == "__main__":

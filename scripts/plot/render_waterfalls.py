@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from src.sss.read_sss_jsf import read_sss_jsf
-from src.data_loader.read_sbp_jsf import read_sbp_jsf
+from src.sbp.read_sbp_jsf import read_sbp_jsf
 
 ROOT = Path(__file__).parent.parent
 

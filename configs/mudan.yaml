@@ -13,7 +13,8 @@ environment:
 
 mbes:
   source: data/multibeam/G1m_142m.txt
-  out_tif: outputs/tif/mbes_bathymetry.tif
+  bathymetry_tif: outputs/tif/mbes_bathymetry.tif
+  vrm_tif: outputs/tif/mbes_vrm.tif
 
 sss:
   channels: [HF_port, HF_stbd]    # swap to [LF_port, LF_stbd] for LF
@@ -25,18 +26,25 @@ sss:
       cable_length: null
 
   outputs:
-    bs_tif: outputs/tif/sss_backscatter_hf.tif
-    lbl_tif: outputs/tif/sss_clusters_hf.tif
-    validation_dir: outputs/sss_validation/hf
+    bs_hf_tif: outputs/tif/sss_backscatter_hf.tif
+    lbl_hf_tif: outputs/tif/sss_clusters_hf.tif
+    bs_lf_tif: outputs/tif/sss_backscatter_lf.tif
+    lbl_lf_tif: outputs/tif/sss_clusters_lf.tif
+    validation_dir: outputs/sss_validation
 
   cluster:
     method: kmeans
-    k_init: 8
+    k_init: 7
 
 sbp:
-  calibration_constant: 1.642613e8
+  # Calibration coefficient (run calibrate_sbp_cc.py to estimate)
+  calibration_constant: 3.7134e+04
+
   survey_dirs:
-    - path: data/sbp/20251223
-    - path: data/sbp/20251224
+     - path: data/sbp
+
   outputs:
-    tif: outputs/tif/sbp_isopach.tif
+    rl_tif: outputs/tif/sbp_rl.tif
+    sediment_tif: outputs/tif/sbp_sediment_class.tif
+    confidence_tif: outputs/tif/sbp_confidence.tif
+    isopach_tif: outputs/tif/sbp_isopach.tif

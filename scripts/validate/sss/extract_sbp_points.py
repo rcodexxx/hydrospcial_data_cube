@@ -19,7 +19,7 @@ from pyproj import Transformer
 from tqdm import tqdm
 
 # 匯入你原本專案架構內的模組
-from src.data_loader.read_sbp_jsf import read_sbp_jsf
+from src.sbp.read_sbp_jsf import read_sbp_jsf
 from src.sbp.calculation import SEDIMENT_LABELS, classify_sediment, compute_rl
 from src.config import SBP_CC, EPSG, ROOT
 

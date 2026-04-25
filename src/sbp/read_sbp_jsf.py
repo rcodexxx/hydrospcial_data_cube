@@ -132,6 +132,9 @@ def read_sbp_jsf(jsf_file_path, verbose=False):
                 # Data format
                 data_fmt = struct.unpack_from("<h", pay, 34)[0]
 
+                # Weighting Factor (block floating-point scale exponent)
+                weighting_factor = struct.unpack_from("<h", pay, 168)[0]
+
                 # Validity flag
                 validity = struct.unpack_from("<H", pay, 30)[0]
 
@@ -167,23 +170,26 @@ def read_sbp_jsf(jsf_file_path, verbose=False):
                         altitude_m = alt_mm / 1000.0
 
                 # Acoustic samples
+                # Apply block floating-point weighting factor to restore true amplitude:
+                # ScaledSample = RawSample × 2^(-N), where N is the weighting factor.
+                # See EdgeTech JSF format spec (Table 2-5: Weighting Factor Block).
                 data_len = pay_size - 240
                 envelope = np.empty(0, dtype=np.float32)
                 if data_len > 0:
                     raw_bytes = np.frombuffer(pay[240:pay_size], dtype=np.int16)
+                    scale = 2.0 ** (-weighting_factor)
                     if data_fmt in (1, 9):
                         # I/Q: two shorts per sample
                         try:
-                            cplx = raw_bytes.reshape(-1, 2)
-                            envelope = np.hypot(
-                                cplx[:, 0].astype(np.float32),
-                                cplx[:, 1].astype(np.float32),
-                            )
+                            cplx = raw_bytes.reshape(-1, 2).astype(np.float64)
+                            I = cplx[:, 0] * scale
+                            Q = cplx[:, 1] * scale
+                            envelope = np.hypot(I, Q).astype(np.float32)
                         except ValueError:
-                            envelope = np.abs(raw_bytes).astype(np.float32)
+                            envelope = (np.abs(raw_bytes).astype(np.float64) * scale).astype(np.float32)
                     else:
                         # Envelope or raw: one short per sample
-                        envelope = np.abs(raw_bytes).astype(np.float32)
+                        envelope = (np.abs(raw_bytes).astype(np.float64) * scale).astype(np.float32)
 
                 ping_t = t if t > 0 else float(counter)
                 s = raw["sbp"]

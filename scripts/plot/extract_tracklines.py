@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from pyproj import Transformer
 
-from src.data_loader.read_sbp_jsf import read_sbp_jsf
+from src.sbp.read_sbp_jsf import read_sbp_jsf
 from src.sss.read_sss_jsf import read_sss_jsf
 
 ROOT = Path(".")

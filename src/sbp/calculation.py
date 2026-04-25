@@ -1,221 +1,238 @@
-# src/sbp/calculation.py
+"""
+Reflection Loss (RL) computation and sediment classification.
+
+RL thresholds are derived analytically from sediment density and Vp/Vw
+ratios using freshwater acoustics. This avoids using Hamilton (1980)'s
+seawater-calibrated RL values directly, which would be biased for
+freshwater environments.
+
+References:
+  Hamilton (1980) — continental terrace sediment parameters (Table 1)
+  Holland et al. (2024) — mud acoustics, compacted mud
+  McAnally et al. (2007) — fluid mud
+  Huang & Liu (2015) — CC calibration and RL formula (Eq. 6, 9)
+"""
 from typing import Optional
 
 import numpy as np
 
-from src.config import SOUND_SPEED
+from src.config import get_config
+from src.sbp.config import (
+    BLANKING_SAMPLES, RL_MIN, RL_MAX,
+    CC_TIGHT_WIN_SAMPLES, CC_MIN_BSB_RATIO,
+)
 
-SAMPLE_DEPTH = 20480e-9 * SOUND_SPEED / 2  # 0.015247 m/sample
 
-Z_WATER = 1000 * SOUND_SPEED  # Pa·s/m
+# ──────────────────────────────────────────────────────────
+# Environment-dependent constants (resolved from yaml at first call)
+# ──────────────────────────────────────────────────────────
+def _sound_speed():
+    return get_config()["environment"]["sound_speed"]
 
-SEDIMENT_THRESHOLDS = [
-    (7.33,         "Coarse sand"),
-    (8.02,         "Fine sand"),
-    (8.73,         "Very fine sand"),
-    (9.63,         "Silty sand"),
-    (9.82,         "Sandy silt"),
-    (10.25,        "Silt"),
-    (11.98,        "Sandy-silt-clay"),
-    (13.37,        "Clayey silt/Silty clay"),
-    (23.95,        "Compacted mud"),       
-    (float("inf"), "Fluid mud"),               
+
+def _z_water():
+    return 1000.0 * _sound_speed()   # freshwater: ρ = 1000 kg/m³
+
+
+def _sample_depth():
+    # 20480 ns / 2 (one-way) × speed
+    return 20480e-9 * _sound_speed() / 2.0
+
+
+# ──────────────────────────────────────────────────────────
+# Sediment physical properties (density g/cc, Vp/Vw ratio)
+#
+# Grouped categories for freshwater reservoir environment:
+# - Sand classes (fine/very fine/silty) merged into one: Hamilton's
+#   sub-categories differ by <0.04 in vp_ratio, within noise floor.
+# - Silt and sandy silt merged: similar reasoning.
+# - Clayey silt and silty clay merged: differ only in clay/silt ratio
+#   (Shepard 1954 textural classification), acoustically equivalent.
+# - Compacted mud kept separate: represents consolidation state, not
+#   grain composition. Holland et al. 2024 'soft compacted mud'
+#   parameters are appropriate for young reservoir sediments (<60
+#   years since dam construction in Mudan Reservoir).
+# - Fluid mud kept separate: near-bed high-concentration suspension,
+#   acoustically similar to water.
+#
+# Values for merged classes are arithmetic means of Hamilton (1980)
+# Table 1 originals.
+# ──────────────────────────────────────────────────────────
+SEDIMENT_PROPERTIES = [
+    # (name, density_g_cc, vp_ratio)
+    ("Coarse sand",              2.034, 1.201),   # Hamilton 1980
+    ("Fine sand / Silty sand",   1.876, 1.119),   # merged 3 Hamilton classes
+    ("Silt / Sandy silt",        1.777, 1.068),   # merged 2 Hamilton classes
+    ("Sand-silt-clay",           1.590, 1.033),   # Hamilton 1980
+    ("Compacted mud",            1.500, 1.015),   # Holland et al. 2024
+    ("Clayey silt / Silty clay", 1.455, 1.002),   # merged 2 Hamilton classes
+    ("Fluid mud",                1.150, 0.990),   # McAnally et al. 2007
 ]
 
-SEDIMENT_LABELS = [label for _, label in SEDIMENT_THRESHOLDS]
 
-RL_MIN = 3.0
-RL_MAX = 30.0
+def _compute_rl_thresholds():
+    """
+    Derive per-sediment RL values and classification thresholds.
+    Called lazily (when SEDIMENT_THRESHOLDS first accessed).
+    """
+    c = _sound_speed()
+    z_w = _z_water()
+
+    results = []
+    for name, rho_g_cc, vp_ratio in SEDIMENT_PROPERTIES:
+        rho = rho_g_cc * 1000.0
+        vp = vp_ratio * c
+        z_sed = rho * vp
+        r = abs((z_sed - z_w) / (z_sed + z_w))
+        rl_db = -20.0 * np.log10(max(r, 1e-10))
+        results.append((name, rho, vp, z_sed, rl_db))
+
+    # Sort by RL ascending (strong reflector → weak reflector)
+    results.sort(key=lambda x: x[4])
+
+    # Classification thresholds: midpoint between adjacent sediment types
+    thresholds = []
+    for i, (name, rho, vp, z, rl) in enumerate(results):
+        if i < len(results) - 1:
+            rl_next = results[i + 1][4]
+            t = (rl + rl_next) / 2.0
+        else:
+            t = float("inf")
+        thresholds.append((t, name))
+    return results, thresholds
 
 
+# Cached on first call (avoids recomputing per RL lookup)
+_cached = {"data": None, "thresholds": None, "labels": None}
+
+
+def _ensure_cached():
+    if _cached["data"] is None:
+        data, thresholds = _compute_rl_thresholds()
+        _cached["data"] = data
+        _cached["thresholds"] = thresholds
+        _cached["labels"] = [name for _, name in thresholds]
+
+
+def get_sediment_labels():
+    _ensure_cached()
+    return _cached["labels"]
+
+
+def get_sediment_thresholds():
+    _ensure_cached()
+    return _cached["thresholds"]
+
+
+def print_threshold_table():
+    """Diagnostic: print derived RL thresholds and sediment parameters."""
+    _ensure_cached()
+    print(f"{'Sediment':<22s} {'ρ kg/m³':>9s} {'Vp m/s':>8s} "
+          f"{'Z_sed':>10s} {'RL dB':>7s} {'Upper':>8s}")
+    print("-" * 72)
+    for (name, rho, vp, z, rl), (t, _) in zip(
+        _cached["data"], _cached["thresholds"]
+    ):
+        t_str = f"{t:.2f}" if t != float("inf") else "∞"
+        print(f"{name:<22s} {rho:9.0f} {vp:8.1f} {z:10.2e} "
+              f"{rl:7.2f} {t_str:>8s}")
+
+
+# ──────────────────────────────────────────────────────────
+# Classification
+# ──────────────────────────────────────────────────────────
 def classify_sediment(rl_db: float) -> int:
-    """
-    依據物理聲學推導之絕對閾值進行沉積物分類。
-    """
     if np.isnan(rl_db) or rl_db < 0:
         return -1
-
-    for i, (thresh, _) in enumerate(SEDIMENT_THRESHOLDS):
+    _ensure_cached()
+    for i, (thresh, _) in enumerate(_cached["thresholds"]):
         if rl_db < thresh:
             return i
-
-    return len(SEDIMENT_THRESHOLDS) - 1
-
-
-def rl_to_impedance(rl_db: float | np.ndarray) -> float | np.ndarray:
-    R = np.power(10.0, -np.asarray(rl_db) / 20.0)
-    R = np.clip(R, 0.0, 0.9999)
-    return Z_WATER * (1.0 + R) / (1.0 - R)
+    return len(_cached["thresholds"]) - 1
 
 
-def estimate_cc(
-    amps: np.ndarray, blanking: int = 50, tight_win: int = 50
-) -> Optional[float]:
+def rl_to_vp(rl_db: float) -> float:
     """
-    Estimate calibration coefficient CC from a single ping.
-    CC = (r1 * A1)^2 / (r2 * A2)
-    where r1*A1 = range*amplitude of bottom echo (B),
-          r2*A2 = range*amplitude of bottom-surface-bottom echo (BSB).
-    Ref: Huang & Liu (2015) Eq. (6)
+    Map RL to Vp by classifying first, then returning that sediment's Vp.
+    Used by isopach depth conversion.
     """
-    if len(amps) < 500:
+    if not np.isfinite(rl_db) or rl_db < 0:
+        return _sound_speed()
+    idx = classify_sediment(rl_db)
+    if idx < 0:
+        return _sound_speed()
+    _ensure_cached()
+    return float(_cached["data"][idx][2])
+
+
+def find_bsb_in_average(avg_trace: np.ndarray, idx_b: int) -> Optional[int]:
+    """
+    Locate BSB peak in a segment-averaged trace.
+
+    Searches within 2 × idx_B ± 7.5% (the BSB window from
+    Huang & Liu 2015). Used by both estimate_cc and method figures
+    to ensure consistency.
+
+    Returns
+    -------
+    idx_bsb : int or None
+        Sample index of BSB peak, or None if window is too narrow.
+    """
+    bsb_start = int(idx_b * 1.95)
+    bsb_end = min(len(avg_trace), int(idx_b * 2.10))
+    if bsb_end - bsb_start < 10:
         return None
-    idx_b = int(np.argmax(amps[blanking:])) + blanking
-    amp_b = float(amps[idx_b])
+    return int(np.argmax(avg_trace[bsb_start:bsb_end])) + bsb_start
+
+
+def estimate_cc(amps_segment: np.ndarray) -> Optional[float]:
+    """
+    Estimate CC from a stable calibration segment via ping averaging.
+    See Huang & Liu 2015, Eq. (6).
+    """
+    if amps_segment.ndim != 2 or amps_segment.shape[0] < 30:
+        return None
+
+    avg = np.mean(amps_segment, axis=0)
+    if len(avg) < 100:
+        return None
+
+    from src.sbp.sbr_picking import find_bottom
+    idx_b = find_bottom(avg)
+    amp_b = float(avg[idx_b])
     if amp_b <= 0:
         return None
-    center = idx_b * 2
-    bsb_start = max(center - tight_win, int(idx_b * 1.9))
-    bsb_end = min(len(amps), center + tight_win)
-    if bsb_end <= bsb_start:
+
+    idx_bsb = find_bsb_in_average(avg, idx_b)
+    if idx_bsb is None:
         return None
-    idx_bsb = int(np.argmax(amps[bsb_start:bsb_end])) + bsb_start
-    amp_bsb = float(amps[idx_bsb])
-    if amp_bsb <= 0 or amp_bsb < amp_b * 0.05:
+
+    amp_bsb = float(avg[idx_bsb])
+    if amp_bsb <= 0 or amp_bsb >= amp_b:
         return None
-    return (idx_b * amp_b) ** 2 / (idx_bsb * amp_bsb)
+
+    return amp_b ** 2 / amp_bsb
 
 
-def compute_rl(amps, cc, blanking=50):
-    """
-    Compute reflection loss from a single ping.
-    RL = -20 * log10(r1 * A1 / CC)
-    Ref: Huang & Liu (2015) Eq. (9)
-    """
-    if len(amps) < 100 or cc <= 0:
-        return None
-    search = amps[blanking:]
-    if len(search) == 0:
-        return None
-    idx_b = int(np.argmax(search)) + blanking
-    amp_b = float(amps[idx_b])
-    if amp_b <= 0:
-        return None
-    R = (idx_b * amp_b) / cc
-    if R <= 0:
-        return None
-    rl = -20.0 * np.log10(R)
-    return float(np.clip(rl, RL_MIN, RL_MAX))
-
-
-def compute_global_cc(
-    jsf_paths,
-    read_sbp_jsf_fn,
-    vrm_tif,
-    bs_tif,
-    transformer,
-    sample_raster_fn,
-    min_consec: int = 20,
-) -> float:
-    """
-    Compute global calibration coefficient from flat, uniform-substrate segments.
-    Uses VRM (low = flat) and SSS backscatter (low std = uniform substrate)
-    to select high-quality calibration segments.
-    """
-    jsf_list = list(jsf_paths)
-    all_vrm = []
-
-    for jsf in jsf_list:
-        data = read_sbp_jsf_fn(jsf)
-        if "SBP" not in data:
-            continue
-        d = data["SBP"]
-        valid = ~np.isnan(d["lon"])
-        if valid.sum() == 0:
-            continue
-        x, y = transformer.transform(d["lon"][valid], d["lat"][valid])
-        vrm = sample_raster_fn(vrm_tif, x, y)
-        all_vrm.extend(vrm[np.isfinite(vrm)].tolist())
-
-    if not all_vrm:
-        raise RuntimeError("No valid VRM data found.")
-
-    vrm_thresh = float(np.percentile(all_vrm, 25))
-    candidates = []
-
-    for jsf in jsf_list:
-        data = read_sbp_jsf_fn(jsf)
-        if "SBP" not in data:
-            continue
-        d = data["SBP"]
-        valid = ~np.isnan(d["lon"])
-        if valid.sum() < min_consec:
-            continue
-        x, y = transformer.transform(d["lon"][valid], d["lat"][valid])
-        orig = np.where(valid)[0]
-        vrm = sample_raster_fn(vrm_tif, x, y)
-        bs = sample_raster_fn(bs_tif, x, y)
-        quality = np.isfinite(vrm) & (vrm < vrm_thresh) & np.isfinite(bs)
-
-        start, end = _find_longest_run(quality)
-        if end - start < min_consec:
-            continue
-        bs_seg_std = float(np.nanstd(bs[start:end]))
-        candidates.append(
-            {
-                "jsf": jsf,
-                "valid": valid,
-                "orig": orig,
-                "start": start,
-                "end": end,
-                "bs_std": bs_seg_std,
-            }
-        )
-
-    if not candidates:
-        raise RuntimeError("No flat segments found for calibration.")
-
-    bs_stds = np.array([c["bs_std"] for c in candidates])
-    bs_std_thresh = float(np.percentile(bs_stds, 25))
-    good = [c for c in candidates if c["bs_std"] <= bs_std_thresh]
-    all_cc = []
-
-    for c in good:
-        data = read_sbp_jsf_fn(c["jsf"])["SBP"]
-        amps_valid = data["amps"][c["valid"]]
-        for i in range(c["start"], c["end"]):
-            cc = estimate_cc(amps_valid[i])
-            if cc is not None and cc > 0:
-                all_cc.append(cc)
-
-    if not all_cc:
-        raise RuntimeError("No valid CC computed.")
-
-    all_cc = np.array(all_cc)
-    q25, q75 = np.percentile(all_cc, 25), np.percentile(all_cc, 75)
-    iqr = q75 - q25
-    mask = (all_cc >= q25 - 1.5 * iqr) & (all_cc <= q75 + 1.5 * iqr)
-    return float(np.median(all_cc[mask]))
-
-
-def _find_longest_run(bool_arr):
-    best_s, best_n = 0, 0
-    cur_s, cur_n = 0, 0
-    for i, v in enumerate(bool_arr):
-        if v:
-            cur_n += 1
-            if cur_n > best_n:
-                best_n, best_s = cur_n, cur_s
-        else:
-            cur_s, cur_n = i + 1, 0
-    return best_s, best_s + best_n
-
-
-def compute_rl_batch(amps_2d, cc, blanking=50):
-    """一次處理所有ping，回傳RL array。"""
+def compute_rl_batch(amps_2d: np.ndarray, cc: float) -> np.ndarray:
     n_pings = amps_2d.shape[0]
     rl = np.full(n_pings, np.nan, dtype=np.float64)
-
     if cc <= 0 or amps_2d.shape[1] < 100:
         return rl
 
-    search = amps_2d[:, blanking:]
-    idx_b = np.argmax(search, axis=1) + blanking
+    search = amps_2d[:, BLANKING_SAMPLES:]
+    idx_b = np.argmax(search, axis=1) + BLANKING_SAMPLES
     amp_b = amps_2d[np.arange(n_pings), idx_b]
 
     valid = amp_b > 0
-    R = np.where(valid, (idx_b * amp_b) / cc, 0.0)
-    valid &= R > 0
+    ratio = np.where(valid, amp_b / cc, 0.0)
+    valid &= ratio > 0
 
-    rl[valid] = np.clip(-20.0 * np.log10(R[valid]), RL_MIN, RL_MAX)
+    rl[valid] = np.clip(-20.0 * np.log10(ratio[valid]), RL_MIN, RL_MAX)
     return rl
+
+
+if __name__ == "__main__":
+    import os
+    os.environ.setdefault("HYDRO_CONFIG", "configs/mudan.yaml")
+    print_threshold_table()
