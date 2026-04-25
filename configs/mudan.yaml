@@ -48,3 +48,18 @@ sbp:
     sediment_tif: outputs/tif/sbp_sediment_class.tif
     confidence_tif: outputs/tif/sbp_confidence.tif
     isopach_tif: outputs/tif/sbp_isopach.tif
+
+mag:
+  survey_dirs:
+    - { path: "data/mag/20251223", date: "2025-12-23" }
+    - { path: "data/mag/20260108", date: "2026-01-08" }
+  igrf_center:
+    lat: 22.137
+    lon: 120.787
+  layback_m: 10
+  outputs:
+    background_tif: outputs/tif/mag_background.tif
+    residual_tif:   outputs/tif/mag_residual.tif
+    anomaly_tif:    outputs/tif/mag_anomaly.tif
+    confidence_tif: outputs/tif/mag_confidence.tif
+    targets_csv:    outputs/csv/mag_targets.csv 
