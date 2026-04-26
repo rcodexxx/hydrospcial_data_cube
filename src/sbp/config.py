@@ -62,3 +62,30 @@ THICK_MAX_M = 3.0                # reservoir-specific upper bound
 IDW_MAX_GAP_M = 70.0             # max gap between tracklines for interp
 IDW_K_NEIGHBORS = 12             # typical value (was 200, too many)
 IDW_EPS = 1e-6                    # regularization to avoid /0
+
+# ──────────────────────────────────────────────────────────
+# Sediment classification color palette (7 classes after merging).
+# Single source of truth, used by:
+#   - scripts/plot/plot_sub_bottom.py (thesis figures)
+#   - scripts/build/build_sediment_rgb.py (viewer GeoTIFF)
+#   - api_server SEDIMENT_LABELS for UI legend
+# ──────────────────────────────────────────────────────────
+SEDIMENT_COLORS = [
+    "#A0522D",  # 0: Coarse sand
+    "#CD853F",  # 1: Fine sand / Silty sand
+    "#DEB887",  # 2: Silt / Sandy silt
+    "#BDB76B",  # 3: Sand-silt-clay
+    "#8FBC8F",  # 4: Compacted mud
+    "#6495ED",  # 5: Clayey silt / Silty clay
+    "#2E5C8A",  # 6: Fluid mud
+]
+
+SEDIMENT_LABELS = [
+    "Coarse sand",
+    "Fine sand / Silty sand",
+    "Silt / Sandy silt",
+    "Sand-silt-clay",
+    "Compacted mud",
+    "Clayey silt / Silty clay",
+    "Fluid mud",
+]

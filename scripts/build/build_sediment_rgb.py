@@ -1,21 +1,22 @@
 """
 Generate RGB GeoTIFF from categorical sediment classification.
 
-Reads sediment class TIF (int8, values 0..6, nodata -1) and writes a
-4-band RGBA GeoTIFF colored by SEDIMENT_COLORS palette. Used by the
-viewer tile server (localtileserver renders RGB directly).
+Outputs a 3-band RGB GeoTIFF colored by SEDIMENT_COLORS palette,
+with a designated nodata color (255, 255, 255) for non-coverage
+pixels. Tile server treats this color as transparent.
 
-Output is masked to MBES bathymetry coverage so the viewer never shows
-SBP-only areas outside the multibeam survey extent.
-
-Color palette is shared with plot_sub_bottom.py (thesis figures),
-ensuring viewer and figures use identical colors.
+Output is masked to MBES bathymetry coverage so the viewer never
+shows SBP-only areas outside the multibeam survey extent.
 """
 import numpy as np
 import rasterio
 
-from src.config import get_config, ROOT
+from src.config import ROOT, get_config
 from src.sbp.config import SEDIMENT_COLORS
+
+# Sentinel RGB for transparent areas. White (255,255,255) chosen
+# because it never appears in the natural sediment palette.
+NODATA_RGB = (255, 255, 255)
 
 
 def hex_to_rgb(hex_color):
@@ -36,7 +37,6 @@ def main():
         cls = src.read(1)
         profile = src.profile.copy()
 
-    # MBES coverage mask: alpha=0 outside MBES, regardless of sediment value
     with rasterio.open(mbes_path) as mb:
         dem = mb.read(1).astype(np.float32)
         if mb.nodata is not None:
@@ -50,20 +50,21 @@ def main():
         )
 
     h, w = cls.shape
-    rgb = np.zeros((3, h, w), dtype=np.uint8)
-    alpha = np.zeros((h, w), dtype=np.uint8)
+    # Initialize all pixels to NODATA_RGB; valid pixels overwritten below
+    rgb = np.full((3, h, w), NODATA_RGB[0], dtype=np.uint8)
+    for ch in range(3):
+        rgb[ch].fill(NODATA_RGB[ch])
 
     for i, color in enumerate(palette):
         mask = (cls == i) & mbes_mask
         rgb[0][mask] = color[0]
         rgb[1][mask] = color[1]
         rgb[2][mask] = color[2]
-        alpha[mask] = 255
 
     profile.update(
-        count=4,
+        count=3,
         dtype="uint8",
-        nodata=None,
+        nodata=NODATA_RGB[0],   # tile server uses this for transparency
         photometric="RGB",
         compress="lzw",
     )
@@ -74,14 +75,14 @@ def main():
         dst.write(rgb[0], 1)
         dst.write(rgb[1], 2)
         dst.write(rgb[2], 3)
-        dst.write(alpha, 4)
 
-    n_valid = (alpha > 0).sum()
+    n_visible = ((cls != -1) & mbes_mask).sum()
     print(f"Saved: {out_path.relative_to(ROOT)}")
     print(f"  size           : {h}x{w}")
     print(f"  classes        : {len(palette)}")
     print(f"  MBES coverage  : {100 * mbes_mask.sum() / (h * w):.1f}%")
-    print(f"  visible pixels : {100 * n_valid / (h * w):.1f}%")
+    print(f"  visible pixels : {100 * n_visible / (h * w):.1f}%")
+    print(f"  nodata RGB     : {NODATA_RGB} (transparent in viewer)")
 
 
 if __name__ == "__main__":

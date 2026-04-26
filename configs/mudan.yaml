@@ -71,8 +71,20 @@ cube:
     - { var: vrm,            path: outputs/tif/mbes_vrm.tif,             units: "",   dtype: float32, kind: continuous,  desc: "Vector ruggedness measure" }
     - { var: bs_lf,          path: outputs/tif/sss_backscatter_lf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 230 kHz (LF)" }
     - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
-    - { var: facies_lf,      path: outputs/tif/sss_clusters_lf.tif,      units: "",   dtype: uint8,   kind: categorical, desc: "Acoustic facies, LF (K-means cluster ID)" }
-    - { var: facies_hf,      path: outputs/tif/sss_clusters_hf.tif,      units: "",   dtype: uint8,   kind: categorical, desc: "Acoustic facies, HF (K-means cluster ID)" }
     - { var: rl,             path: outputs/tif/sbp_rl.tif,               units: "dB", dtype: float32, kind: continuous,  desc: "Reflection loss" }
     - { var: sediment_class, path: outputs/tif/sbp_sediment_class.tif,   units: "",   dtype: int8,    kind: categorical, desc: "Hamilton sediment classification" }
     - { var: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          units: "nT", dtype: float32, kind: continuous,  desc: "Magnetic anomaly (F - IGRF)" }
+
+viewer:
+  netcdf: outputs/hydrospatial_datacube.nc
+  tracklines: outputs/tracklines.json
+  waterfalls_dir: outputs/waterfalls
+  static_dir: src/viewer
+  sediment_rgb_tif: outputs/tif/sbp_sediment_rgb.tif
+  contours: src/viewer/static/contours_bathymetry.geojson
+
+  tile_layers:
+    - { id: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      label: "Bathymetry",          palette: turbo_r }
+    - { id: imagery_hf,     path: outputs/tif/sss_backscatter_hf.tif,   label: "SSS Backscatter",     palette: copper }
+    - { id: sediment_class, path: outputs/tif/sbp_sediment_rgb.tif,     label: "Sediment Class",      palette: null }
+    - { id: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          label: "Magnetic Anomaly",    palette: rdbu }

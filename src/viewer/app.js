@@ -1,13 +1,18 @@
 const API = '';
 
-const SED_NATURAL_COLORS = [
-    '#c2a64d', '#d4b96a', '#dcc88a', '#b8a88a', '#a09880', 
-    '#8a8578', '#7a7a70', '#6b6e6a', '#5c6260', '#4a5550', '#3a4a55'
+const SEDIMENT_COLORS = [
+    "#A0522D",  // 0: Coarse sand
+    "#CD853F",  // 1: Fine sand / Silty sand
+    "#DEB887",  // 2: Silt / Sandy silt
+    "#BDB76B",  // 3: Sand-silt-clay
+    "#8FBC8F",  // 4: Compacted mud
+    "#6495ED",  // 5: Clayey silt / Silty clay
+    "#2E5C8A",  // 6: Fluid mud
 ];
 
 const SED_LABELS = [
-    'Coarse sand', 'Fine sand', 'Very fine sand', 'Silty sand', 'Sandy silt', 
-    'Silt', 'Sandy-silt-clay', 'Silty clay', 'Clayey silt', 'Framework mud', 'Fluid mud'
+    'Coarse sand', 'Fine sand / Silty sand', 'Silt / Sandy silt',
+    'Sand-silt-clay', 'Compacted mud', 'Clayey silt / Silty clay', 'Fluid mud'
 ];
 
 // ── 全域狀態與變數 ─────────────────────────────────────────
@@ -60,27 +65,45 @@ map.on('moveend zoomend', () => {
     graticuleLayer.addTo(map);
 });
 
+
 // 載入網格影像圖層
+let HAS_ISOPACH = false;
 fetch(API + '/api/layers').then(r => r.json()).then(data => {
-    if (data.bounds) { map.setMaxBounds(L.latLngBounds(data.bounds).pad(0.3)); map.fitBounds(L.latLngBounds(data.bounds).pad(0.05)); }
-    for (const [key, cfg] of Object.entries(data.layers)) { tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 22, maxNativeZoom: 22 }); }
-    if (tileLayers['bathymetry']) { tileLayers['bathymetry'].addTo(map); currentOverlay = tileLayers['bathymetry']; }
+    HAS_ISOPACH = data.features?.has_isopach ?? false;
+    console.log('Feature flags:', data.features);
+    
+    if (data.bounds) { 
+        map.setMaxBounds(L.latLngBounds(data.bounds).pad(0.3)); 
+        map.fitBounds(L.latLngBounds(data.bounds).pad(0.05)); 
+    }
+    for (const [key, cfg] of Object.entries(data.layers)) { 
+        tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 22, maxNativeZoom: 22 }); 
+    }
+    if (tileLayers['bathymetry']) { 
+        tileLayers['bathymetry'].addTo(map); 
+        currentOverlay = tileLayers['bathymetry']; 
+    }
 });
 
 // 💡 載入 GeoJSON 等高線並套用智慧調色
 function getContourStyle(layerId) {
-    switch(layerId) {
-        case 'bathymetry':
-            return { color: '#1e293b', weight: 1.5, opacity: 0.6, dashArray: '' }; 
-        case 'imagery_hf':
-            return { color: '#ffffff', weight: 1.5, opacity: 0.7, dashArray: '' }; 
-        case 'sediment_class':
-            return { color: '#1e293b', weight: 1.5, opacity: 0.6, dashArray: '' }; 
-        case 'mag_residual':
-            return { color: '#1e293b', weight: 1.5, opacity: 0.5, dashArray: '' }; 
-        default:
-            return { color: '#1e293b', weight: 1, opacity: 0.5 };
-    }
+    const baseStyles = {
+        bathymetry:     { color: '#1e293b', opacity: 0.6 },
+        imagery_hf:     { color: '#ffffff', opacity: 0.7 },
+        sediment_class: { color: '#1e293b', opacity: 0.6 },
+        mag_anomaly:    { color: '#1e293b', opacity: 0.5 },
+    };
+    const base = baseStyles[layerId] || baseStyles.bathymetry;
+    
+    return (feature) => {
+        const isMajor = feature.properties?.level === 'major';
+        return {
+            color: base.color,
+            weight: isMajor ? 1.5 : 0.6,
+            opacity: isMajor ? base.opacity : base.opacity * 0.5,
+            dashArray: '',
+        };
+    };
 }
 
 function loadStaticContours() {
@@ -115,7 +138,7 @@ sedLegend.onAdd = function() {
     const div = L.DomUtil.create('div');
     div.style.cssText = 'background:white;padding:8px 12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-size:11px;line-height:1.8;';
     div.innerHTML = '<div style="font-weight:bold;margin-bottom:4px;color:#334155;">Sediment Class</div>'
-        + SED_NATURAL_COLORS.map((c, i) =>
+        + SEDIMENT_COLORS.map((c, i) =>
             `<div style="display:flex;align-items:center;gap:6px;">`
             + `<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${c};border:1px solid rgba(0,0,0,0.1);"></span>`
             + `<span style="color:#475569;">${SED_LABELS[i]}</span>`
@@ -403,7 +426,7 @@ function doPointQuery(lat, lon) {
                     hasCoreData = true;
                     if (key === 'sediment_class') {
                         const classId = info.class_id !== undefined ? info.class_id : -1;
-                        const color = (SED_NATURAL_COLORS[classId]) ? SED_NATURAL_COLORS[classId] : '#888';
+                        const color = (SEDIMENT_COLORS[classId]) ? SEDIMENT_COLORS[classId] : '#888';
                         primaryHtml += `<div class="text-[11px] flex justify-between py-1.5 items-center border-b border-slate-50"><span class="font-bold text-slate-700">${info.name}:</span><span class="text-[10px] text-white px-1.5 py-0.5 rounded shadow-sm" style="background:${color}">${info.value}</span></div>`;
                     } else {
                         let val = (typeof info.value === 'number' && info.value % 1 !== 0) ? info.value.toFixed(2) : info.value;
@@ -591,134 +614,116 @@ function renderProfileChart(containerId, depth, isopach, sediment) {
     const chart = echarts.init(container);
     container._chart = chart;
 
+    // Detect if isopach is actually available (might be null even if HAS_ISOPACH)
+    const showIsopach = HAS_ISOPACH && isopach && isopach.some(v => v !== null && !isNaN(v));
+
     const seafloor = [], subbottom = [];
-    
-    // 找出圖表中有效的最大深度，確保填色邏輯能參考到正確的「底部」
     const validDepths = depth.filter(v => v !== null && !isNaN(v));
-    const maxVal = validDepths.length > 0 ? Math.max(...validDepths) : 30;
+    if (validDepths.length === 0) return;
 
     for (let i = 0; i < depth.length; i++) {
         const pct = (i / (depth.length - 1)) * 100;
         if (depth[i] !== null && !isNaN(depth[i])) {
             seafloor.push([pct, depth[i]]);
-            const thick = (isopach && isopach[i] !== null && !isNaN(isopach[i])) ? isopach[i] : 0.5;
-            subbottom.push([pct, depth[i] + thick]);
+            if (showIsopach) {
+                const thick = (isopach[i] !== null && !isNaN(isopach[i])) ? isopach[i] : 0;
+                subbottom.push([pct, depth[i] + thick]);
+            }
         }
     }
     if (seafloor.length === 0) return;
 
-    // 沉積物/風化層 (Custom 系列)
+    // Sediment polygon series — only if isopach gives the band thickness
     const sedimentSeries = [];
-    if (sediment && sediment.length > 0) {
+    if (showIsopach && sediment && sediment.length > 0) {
         const customData = [];
         for (let i = 0; i < depth.length; i++) {
             if (depth[i] === null || isNaN(depth[i])) continue;
-            const thick = (isopach && isopach[i] !== null && !isNaN(isopach[i])) ? isopach[i] : 0.5;
+            const thick = (isopach[i] !== null && !isNaN(isopach[i])) ? isopach[i] : 0;
+            if (thick <= 0) continue;
             const cls = (sediment[i] !== null && !isNaN(sediment[i]) && sediment[i] >= 0) ? sediment[i] : -1;
-            customData.push({ 
-                pct: (i / (depth.length - 1)) * 100, 
-                depthTop: depth[i], 
-                depthBot: depth[i] + thick, 
-                classId: cls 
+            customData.push({
+                pct: (i / (depth.length - 1)) * 100,
+                depthTop: depth[i],
+                depthBot: depth[i] + thick,
+                classId: cls
             });
         }
-        sedimentSeries.push({
-            type: 'custom', name: 'Sediment', data: customData, z: 2, silent: true,
-            renderItem: function(params, api) {
-                if (params.dataIndex >= customData.length - 1) return;
-                const curr = customData[params.dataIndex], next = customData[params.dataIndex + 1];
-                
-                const color = (curr.classId >= 0 && SED_NATURAL_COLORS[curr.classId]) 
-                              ? SED_NATURAL_COLORS[curr.classId] : '#d1d5db';
-                
-                return {
-                    type: 'polygon',
-                    shape: { points: [
-                        api.coord([curr.pct, curr.depthTop]), 
-                        api.coord([next.pct, next.depthTop]), 
-                        api.coord([next.pct, next.depthBot]), 
-                        api.coord([curr.pct, curr.depthBot])
-                    ]},
-                    style: { fill: color, opacity: 1 }
-                };
-            }
+        if (customData.length > 1) {
+            sedimentSeries.push({
+                type: 'custom', name: 'Sediment', data: customData, z: 2, silent: true,
+                renderItem: function(params, api) {
+                    if (params.dataIndex >= customData.length - 1) return;
+                    const curr = customData[params.dataIndex], next = customData[params.dataIndex + 1];
+                    const color = (curr.classId >= 0 && SEDIMENT_COLORS[curr.classId])
+                                  ? SEDIMENT_COLORS[curr.classId] : '#d1d5db';
+                    return {
+                        type: 'polygon',
+                        shape: { points: [
+                            api.coord([curr.pct, curr.depthTop]),
+                            api.coord([next.pct, next.depthTop]),
+                            api.coord([next.pct, next.depthBot]),
+                            api.coord([curr.pct, curr.depthBot])
+                        ]},
+                        style: { fill: color, opacity: 1 }
+                    };
+                }
+            });
+        }
+    }
+
+    // Build series array conditionally
+    const series = [
+        // Water area: always show
+        {
+            name: 'Water', type: 'line', data: seafloor,
+            symbol: 'none', lineStyle: { width: 0 },
+            areaStyle: { color: 'rgba(59,130,246,0.15)', origin: 'start' },
+            z: 0, silent: true
+        },
+    ];
+
+    // Bedrock + sediment + isopach base — only with isopach
+    if (showIsopach) {
+        series.push({
+            name: 'Bedrock Fill', type: 'line', data: subbottom,
+            symbol: 'none', lineStyle: { width: 0 },
+            areaStyle: { color: '#64748b', opacity: 0.15, origin: 'end' },
+            z: 1, silent: true
+        });
+        series.push(...sedimentSeries);
+        series.push({
+            name: 'Isopach Base', type: 'line', data: subbottom,
+            symbol: 'none',
+            lineStyle: { color: '#64748b', width: 1.5, type: 'dashed' },
+            z: 11
         });
     }
 
+    // Seafloor line: always last so it draws on top
+    series.push({
+        name: 'Seafloor', type: 'line', data: seafloor,
+        symbol: 'none',
+        lineStyle: { color: '#0f172a', width: 1.5 },
+        z: 10
+    });
+
     chart.setOption({
         backgroundColor: 'transparent',
-        tooltip: { 
-            trigger: 'axis', showContent: false, 
-            axisPointer: { 
+        tooltip: {
+            trigger: 'axis', showContent: false,
+            axisPointer: {
                 type: 'cross',
                 lineStyle: { color: '#FF5722', width: 1, type: 'dashed' },
                 crossStyle: { color: '#FF5722', width: 1, type: 'dashed' }
-            } 
+            }
         },
         grid: { top: 30, bottom: 20, left: 40, right: 30 },
         xAxis: { type: 'value', min: 0, max: 100, splitLine: { show: false }, axisLabel: { show: false } },
         yAxis: { type: 'value', inverse: true, scale: true, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed', color: '#e2e8f0' } } },
-        series: [
-            // 1. 基岩填色：大幅減輕重量感
-            {
-                name: 'Bedrock Fill',
-                type: 'line',
-                data: subbottom,
-                symbol: 'none',
-                lineStyle: { width: 0 },
-                areaStyle: { 
-                    color: '#64748b', // 改為較輕盈的岩灰色 (Slate-500)
-                    opacity: 0.15,    // 💎 降到 15% 透明度，讓它只是一個背景暗示
-                    origin: 'end' 
-                },
-                z: 1,
-                silent: true
-            },
-            // 2. 水體填充：保持清透
-            { 
-                name: 'Water', 
-                type: 'line', 
-                data: seafloor, 
-                symbol: 'none', 
-                lineStyle: { width: 0 }, 
-                areaStyle: { 
-                    color: 'rgba(59,130,246,0.15)', // 稍微再調淡一點點
-                    origin: 'start' 
-                }, 
-                z: 0, 
-                silent: true 
-            },
-            // 3. 沉積物分層 (Custom)
-            ...sedimentSeries,
-            // 4. 海床線：明確但不粗暴
-            { 
-                name: 'Seafloor', 
-                type: 'line', 
-                data: seafloor, 
-                symbol: 'none', 
-                lineStyle: { 
-                    color: '#0f172a', // 深岩板色
-                    width: 1.5      // 💎 變細，避免壓垮極薄的沉積層
-                }, 
-                z: 10 
-            },
-            // 5. 風化層底部邊界線：用跳色與虛線來「托住」沉積層
-            { 
-                name: 'Isopach Base', 
-                type: 'line', 
-                data: subbottom, 
-                symbol: 'none', 
-                lineStyle: { 
-                    color: '#64748b', 
-                    width: 1.5, 
-                    type: 'dashed'
-                }, 
-                z: 11 
-            },
-        ]
+        series: series
     });
-    
-    // 確保視窗變動時圖表自適應
+
     window.addEventListener('resize', () => chart.resize());
     setTimeout(() => chart.resize(), 350);
 }
@@ -831,7 +836,7 @@ window.buildBoreholeScene = function(lat, lon, title = "虛擬岩心探測") {
     const container = document.getElementById('canvas-container-borehole');
     const loading = document.getElementById('loading-borehole');
     if (!modal) return;
-    
+
     document.getElementById('borehole-title').innerHTML = `🕳️ ${title}`;
     modal.classList.remove('hidden'); loading.classList.remove('hidden');
     modal.onclick = (e) => { if (e.target === modal) window.closeBorehole(); };
@@ -839,65 +844,84 @@ window.buildBoreholeScene = function(lat, lon, title = "虛擬岩心探測") {
     if (window.currentBoreholeRenderer) { container.innerHTML = ''; window.currentBoreholeRenderer.dispose(); }
 
     fetch(`${API}/api/query?lat=${lat}&lon=${lon}`).then(r => r.json()).then(data => {
-        if(data.error) { window.closeBorehole(); return alert(data.error); }
+        if (data.error) { window.closeBorehole(); return alert(data.error); }
         const depth = data.bathymetry?.value || 0;
-        const isopach = data.isopach?.value || null;
+        const isopach = HAS_ISOPACH ? (data.isopach?.value ?? null) : null;
         const sedClassId = data.sediment_class?.class_id ?? -1;
         const sedName = data.sediment_class?.value || 'Unknown';
-        
+
         initBorehole3D(container, { depth, isopach, sedClassId, sedName });
         loading.classList.add('hidden');
     }).catch(err => { console.error(err); alert("載入岩心失敗"); window.closeBorehole(); });
 };
 
+
 function initBorehole3D(container, data) {
     const { depth, isopach, sedClassId, sedName } = data;
-    const Z_EXAGGERATION = 5.0; 
+    const Z_EXAGGERATION = 5.0;
+    const hasSediment = (isopach !== null && isopach > 0);
 
     container.style.position = 'relative';
-    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0f1a); 
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0f1a);
     const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-    camera.position.set(20, 10, 25); 
+    camera.position.set(20, 10, 25);
 
     window.currentBoreholeRenderer = new THREE.WebGLRenderer({ antialias: true });
     window.currentBoreholeRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(window.currentBoreholeRenderer.domElement);
 
     window.currentBoreholeControls = new THREE.OrbitControls(camera, window.currentBoreholeRenderer.domElement);
-    window.currentBoreholeControls.enableDamping = true; window.currentBoreholeControls.autoRotate = false;
+    window.currentBoreholeControls.enableDamping = true;
     window.currentBoreholeControls.target.set(0, -5, 0);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); dirLight.position.set(10, 20, 10); scene.add(dirLight);
 
-    const radius = 4, actualIsopach = (isopach !== null ? isopach : 2.0) * Z_EXAGGERATION; 
-    const bedrockVisualHeight = 15, waterVisualHeight = 8;  
-    const sedHex = (sedClassId >= 0 && sedClassId < SED_NATURAL_COLORS.length) ? SED_NATURAL_COLORS[sedClassId] : '#8a8578';
-    
+    const radius = 4;
+    const actualIsopach = hasSediment ? isopach * Z_EXAGGERATION : 0;
+    const bedrockVisualHeight = 15, waterVisualHeight = 8;
+    const sedHex = (sedClassId >= 0 && sedClassId < SEDIMENT_COLORS.length) ? SEDIMENT_COLORS[sedClassId] : '#8a8578';
+
     const matWater = new THREE.MeshPhysicalMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.15, roughness: 0.1 });
-    const matSediment = new THREE.MeshStandardMaterial({ color: new THREE.Color(sedHex), roughness: 0.8, flatShading: true });
-    const matBedrock = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9, flatShading: true }); 
+    const matBedrock = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9, flatShading: true });
 
     const group = new THREE.Group(); scene.add(group);
-    
+
+    // Water column always
     const meshWater = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, waterVisualHeight, 64), matWater);
     meshWater.position.y = waterVisualHeight / 2; group.add(meshWater);
 
-    const meshSediment = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, actualIsopach, 64), matSediment);
-    meshSediment.position.y = -actualIsopach / 2; group.add(meshSediment);
+    // Sediment layer only if isopach available
+    if (hasSediment) {
+        const matSediment = new THREE.MeshStandardMaterial({ color: new THREE.Color(sedHex), roughness: 0.8, flatShading: true });
+        const meshSediment = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, actualIsopach, 64), matSediment);
+        meshSediment.position.y = -actualIsopach / 2; group.add(meshSediment);
+    }
 
+    // Bedrock cylinder starts right under sediment (or right under seafloor if no sediment)
     const meshBedrock = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, bedrockVisualHeight, 64), matBedrock);
     meshBedrock.position.y = -actualIsopach - (bedrockVisualHeight / 2); group.add(meshBedrock);
 
-    const ring = new THREE.Mesh(new THREE.RingGeometry(radius, radius + 0.5, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.3 }));
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(radius, radius + 0.5, 64),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.3 })
+    );
     ring.rotateX(Math.PI / 2); scene.add(ring);
+
+    // Info overlay
+    const isopachText = hasSediment
+        ? `<span class="font-mono text-orange-400">${isopach.toFixed(2)}m</span>`
+        : `<span class="font-mono text-slate-500 italic">N/A</span>`;
+    const sedRow = hasSediment
+        ? `<div class="flex justify-between mt-2 pt-2 border-t border-slate-700"><span>Type:</span> <span class="font-bold" style="color:${sedHex}">${sedName}</span></div>`
+        : `<div class="mt-2 pt-2 border-t border-slate-700 text-slate-500 italic text-[10px]">Sediment thickness unavailable for this site</div>`;
 
     const infoOverlay = document.createElement('div');
     infoOverlay.className = "absolute top-4 left-4 bg-slate-900/80 border border-slate-700 rounded p-3 z-10 text-slate-300 text-xs shadow-lg w-48";
     infoOverlay.innerHTML = `
         <div class="flex justify-between mb-1"><span>Water:</span> <span class="font-mono text-blue-300">${depth.toFixed(1)}m</span></div>
-        <div class="flex justify-between mb-1"><span>Mud:</span> <span class="font-mono text-orange-400">${isopach !== null ? isopach.toFixed(2)+'m' : 'N/A'}</span></div>
-        <div class="flex justify-between mt-2 pt-2 border-t border-slate-700"><span>Type:</span> <span class="font-bold" style="color:${sedHex}">${sedName}</span></div>
+        <div class="flex justify-between mb-1"><span>Mud:</span> ${isopachText}</div>
+        ${sedRow}
     `;
     container.appendChild(infoOverlay);
 
@@ -973,7 +997,7 @@ function initThreeJS(container, data) {
     let sedHex = '#8a8578', sedLabel = 'Unknown';
     if (sediment_val !== undefined && sediment_val !== null) {
         let id = (typeof sediment_val === 'number') ? Math.round(sediment_val) : SED_LABELS.findIndex(l => l === sediment_val);
-        if (id >= 0 && id < SED_NATURAL_COLORS.length) { sedHex = SED_NATURAL_COLORS[id]; sedLabel = SED_LABELS[id]; }
+        if (id >= 0 && id < SEDIMENT_COLORS.length) { sedHex = SEDIMENT_COLORS[id]; sedLabel = SED_LABELS[id]; }
     }
     const bedrockHex = '#1e293b'; 
 

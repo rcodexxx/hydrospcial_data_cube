@@ -1,24 +1,23 @@
-# scripts/api_server.py
 """
-Hydrospatial Data Cube API Server
+Hydrospatial Data Cube API Server.
 
-Usage:
-    python scripts/api_server.py
-
-Endpoints:
-    GET /                     → viewer HTML page
-    GET /api/query?lat=&lon=  → query all layers at a point
-    GET /api/stats?x0=&y0=&x1=&y1= → region statistics (EPSG:3826)
-    GET /api/layers            → available tile layers
-    GET /api/tracklines        → survey tracklines GeoJSON
+Loads layers and config from yaml. Serves:
+  GET /                       viewer HTML
+  GET /api/layers             tile URLs + map bounds + feature flags
+  GET /api/query              point query across all NetCDF variables
+  GET /api/stats              region stats (EPSG:3826)
+  GET /api/profile            depth/sediment/rl along polyline
+  GET /api/3d-scene           heightmap + SSS texture for 3D block view
+  GET /api/tracklines         survey tracklines GeoJSON
+  GET /api/waterfall-index    waterfall image index for SSS/SBP viewer
 """
-
 import json
+import math
+from contextlib import asynccontextmanager
 from pathlib import Path
-import math 
-import rasterio
-from rasterio.windows import from_bounds
+
 import numpy as np
+import rasterio
 import uvicorn
 import xarray as xr
 from fastapi import FastAPI
@@ -26,123 +25,107 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from localtileserver import TileClient
 from pyproj import Transformer
+from rasterio.windows import from_bounds
 
-# ── Config ───────────────────────────────────────────────────
-ROOT = Path(__file__).parent.parent
-NC_PATH = ROOT / "outputs" / "hydrospatial_datacube.nc"
-TIF_DIR = ROOT / "outputs" / "tif"
-VIEWER_DIR = ROOT / "src" / "viewer"
-TRACKLINES_PATH = ROOT / "outputs" / "tracklines.json"
+from src.config import ROOT, get_config
+from src.sbp.config import SEDIMENT_LABELS
 
-from_ll = Transformer.from_crs("EPSG:4326", "EPSG:3826", always_xy=True)
-to_ll = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
+cfg = get_config()
+viewer_cfg = cfg["viewer"]
 
-SEDIMENT_LABELS = [
-    "Coarse sand",
-    "Fine sand",
-    "Very fine sand",
-    "Silty sand",
-    "Sandy silt",
-    "Silt",
-    "Sandy-silt-clay",
-    "Silty clay",
-    "Clayey silt",
-    "Framework-supported mud",
-    "Fluid mud",
-]
+NC_PATH = ROOT / viewer_cfg["netcdf"]
+TRACKLINES_PATH = ROOT / viewer_cfg["tracklines"]
+WATERFALLS_DIR = ROOT / viewer_cfg["waterfalls_dir"]
+VIEWER_DIR = ROOT / viewer_cfg["static_dir"]
+SSS_HF_TIF = next(
+    (ROOT / l["path"] for l in viewer_cfg["tile_layers"] if l["id"] == "imagery_hf"),
+    None,
+)
 
-# ── Layer definitions ────────────────────────────────────────
-TILE_LAYERS = {
-    "bathymetry": {
-        "tif": "mbes_bathymetry.tif",
-        "label": "Bathymetry",
-        "palette": "turbo_r"
-    },
-    "imagery_hf": {
-        "tif": "sss_backscatter_hf.tif",
-        "label": "SSS Backscatter HF",
-        "palette": "copper"
-    },
-    "sediment_class": {
-        "tif": "sbp_sediment_rgb.tif",
-        "label": "Sediment Class",
-        "palette": None
-    },
-    "mag_residual": {
-        "tif": "mag_residual.tif",
-        "label": "Magnetic Residual",
-        "palette": "rdbu"
-    },
-}
+EPSG = cfg["grid"]["epsg"]
+from_ll = Transformer.from_crs("EPSG:4326", f"EPSG:{EPSG}", always_xy=True)
+to_ll = Transformer.from_crs(f"EPSG:{EPSG}", "EPSG:4326", always_xy=True)
 
-def _get_percentile_range(tif_path, low=2, high=98):
+
+def percentile_range(tif_path, low=2, high=98):
     with rasterio.open(tif_path) as src:
         data = src.read(1).astype(np.float32)
-        nd = src.nodata
-        if nd is not None:
-            data[data == nd] = np.nan
+        if src.nodata is not None:
+            data[data == src.nodata] = np.nan
         valid = data[np.isfinite(data)]
-        if len(valid) == 0:
-            return None, None
-        return float(np.percentile(valid, low)), float(np.percentile(valid, high))
+    if not len(valid):
+        return None, None
+    return float(np.percentile(valid, low)), float(np.percentile(valid, high))
 
-# ── Load NC ──────────────────────────────────────────────────
-ds = xr.open_dataset(NC_PATH)
-print(f"NC loaded: {list(ds.data_vars)}")
-print(f"Grid: x={len(ds.x)}, y={len(ds.y)}")
 
-# ── Start tile servers ───────────────────────────────────────
-tile_clients = {}
+# Module-level state, populated in lifespan startup
+state = {
+    "ds": None,
+    "tile_clients": {},
+    "center": [22.137, 120.785],
+    "bounds_ll": None,
+    "has_isopach": False,
+}
 
-for key, cfg in TILE_LAYERS.items():
-    tif_path = TIF_DIR / cfg["tif"]
-    if tif_path.exists():
+
+@asynccontextmanager
+async def lifespan(_app):
+    if not NC_PATH.exists():
+        raise FileNotFoundError(
+            f"Data cube not found: {NC_PATH}. Run build_datacube.py first."
+        )
+    state["ds"] = xr.open_dataset(NC_PATH)
+    state["has_isopach"] = "isopach" in state["ds"].data_vars
+    print(f"Cube loaded: {list(state['ds'].data_vars)}")
+    print(f"  isopach available: {state['has_isopach']}")
+
+    for layer in viewer_cfg["tile_layers"]:
+        tif_path = ROOT / layer["path"]
+        if not tif_path.exists():
+            print(f"  Skip tile: {tif_path.relative_to(ROOT)} not found")
+            continue
+
         client = TileClient(str(tif_path))
         url_kwargs = {}
 
-        if cfg.get("palette"):
-            url_kwargs["colormap"] = cfg["palette"]
-            vmin, vmax = _get_percentile_range(tif_path)
+        if layer.get("palette"):
+            url_kwargs["colormap"] = layer["palette"]
+            vmin, vmax = percentile_range(tif_path)
             if vmin is not None:
                 url_kwargs["vmin"] = vmin
                 url_kwargs["vmax"] = vmax
-        else:
-            url_kwargs["vmin"] = 0
-            url_kwargs["vmax"] = 255
 
-        native_nodata = client.dataset.nodata
-        if native_nodata is not None:
-            url_kwargs["nodata"] = native_nodata
+        nodata = client.dataset.nodata
+        if nodata is not None:
+            url_kwargs["nodata"] = nodata
 
-        colored_url = client.get_tile_url(**url_kwargs)
-
-        tile_clients[key] = {
+        state["tile_clients"][layer["id"]] = {
             "client": client,
-            "url": colored_url,
-            "label": cfg["label"],
+            "url": client.get_tile_url(**url_kwargs),
+            "label": layer["label"],
             "center": client.center(),
             "bounds": client.bounds(),
         }
-        print(f"  Tile: {key} → {colored_url}")
-    else:
-        print(f"  Skip: {tif_path} not found")
+        print(f"  Tile: {layer['id']} ready")
 
-# get center from bathymetry
-center = [22.137, 120.785]
-bounds_ll = None
-if "bathymetry" in tile_clients:
-    center = list(tile_clients["bathymetry"]["center"])
-    b = tile_clients["bathymetry"]["bounds"]
-    bounds_ll = [[b[0], b[2]], [b[1], b[3]]]  # [[south, west], [north, east]]
+    if "bathymetry" in state["tile_clients"]:
+        info = state["tile_clients"]["bathymetry"]
+        state["center"] = list(info["center"])
+        b = info["bounds"]
+        state["bounds_ll"] = [[b[0], b[2]], [b[1], b[3]]]
 
-# ── FastAPI app ──────────────────────────────────────────────
-app = FastAPI(title="Hydrospatial Data Cube")
+    yield
 
-# serve viewer HTML
+    # Cleanup
+    if state["ds"] is not None:
+        state["ds"].close()
+
+
+app = FastAPI(title="Hydrospatial Data Cube", lifespan=lifespan)
 VIEWER_DIR.mkdir(exist_ok=True)
-
 app.mount("/viewer", StaticFiles(directory=VIEWER_DIR), name="viewer")
-app.mount("/waterfalls", StaticFiles(directory=ROOT / "outputs" / "waterfalls"), name="waterfalls")
+if WATERFALLS_DIR.exists():
+    app.mount("/waterfalls", StaticFiles(directory=WATERFALLS_DIR), name="waterfalls")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -155,34 +138,28 @@ async def index():
 
 @app.get("/api/layers")
 async def get_layers():
-    layers = {}
-    for key, info in tile_clients.items():
-        layers[key] = {
-            "label": info["label"],
-            "url": info["url"],
-        }
     return {
-        "layers": layers,
-        "center": center,
-        "bounds": bounds_ll,
+        "layers": {k: {"label": v["label"], "url": v["url"]}
+                   for k, v in state["tile_clients"].items()},
+        "center": state["center"],
+        "bounds": state["bounds_ll"],
+        "features": {
+            "has_isopach": state["has_isopach"],
+        },
     }
 
 
 @app.get("/api/query")
 async def query_point(lat: float, lon: float):
+    ds = state["ds"]
     x, y = from_ll.transform(lon, lat)
 
-    if (
-        x < ds.x.values.min()
-        or x > ds.x.values.max()
-        or y < ds.y.values.min()
-        or y > ds.y.values.max()
-    ):
+    if (x < ds.x.values.min() or x > ds.x.values.max() or
+            y < ds.y.values.min() or y > ds.y.values.max()):
         return {"error": "Outside data bounds"}
 
     xi = int(np.argmin(np.abs(ds.x.values - x)))
     yi = int(np.argmin(np.abs(ds.y.values - y)))
-
     result = {"lat": lat, "lon": lon, "x_3826": round(x, 1), "y_3826": round(y, 1)}
 
     for var in ds.data_vars:
@@ -194,21 +171,12 @@ async def query_point(lat: float, lon: float):
         long_name = ds[var].attrs.get("long_name", var)
         units = ds[var].attrs.get("units", "")
 
-        if np.isnan(val) if val is not None else True:
+        if val is None or np.isnan(val):
             result[var] = {"name": long_name, "value": None, "units": units}
         elif var == "sediment_class":
             idx = int(val)
-            label = (
-                SEDIMENT_LABELS[idx]
-                if 0 <= idx < len(SEDIMENT_LABELS)
-                else f"class {idx}"
-            )
-            result[var] = {
-                "name": long_name,
-                "value": label,
-                "units": "",
-                "class_id": idx,
-            }
+            label = SEDIMENT_LABELS[idx] if 0 <= idx < len(SEDIMENT_LABELS) else f"class {idx}"
+            result[var] = {"name": long_name, "value": label, "units": "", "class_id": idx}
         else:
             result[var] = {"name": long_name, "value": round(val, 4), "units": units}
 
@@ -217,16 +185,14 @@ async def query_point(lat: float, lon: float):
 
 @app.get("/api/stats")
 async def region_stats(x0: float, y0: float, x1: float, y1: float):
-    """Region stats. Expects EPSG:3826 coordinates."""
+    ds = state["ds"]
     region = ds.sel(
         x=slice(min(x0, x1), max(x0, x1)),
         y=slice(max(y0, y1), min(y0, y1)),
     )
 
-    # convert corners to lat/lon
     lon0, lat0 = to_ll.transform(x0, y0)
     lon1, lat1 = to_ll.transform(x1, y1)
-
     result = {
         "width_m": round(abs(x1 - x0), 1),
         "height_m": round(abs(y1 - y0), 1),
@@ -241,23 +207,18 @@ async def region_stats(x0: float, y0: float, x1: float, y1: float):
         long_name = ds[var].attrs.get("long_name", var)
         units = ds[var].attrs.get("units", "")
 
-        if len(valid) == 0:
+        if not len(valid):
             result["layers"][var] = {"name": long_name, "value": None}
             continue
 
         if var == "sediment_class":
             classes, counts = np.unique(valid.astype(int), return_counts=True)
-            dominant = int(classes[np.argmax(counts)])
-            label = (
-                SEDIMENT_LABELS[dominant]
-                if 0 <= dominant < len(SEDIMENT_LABELS)
-                else f"class {dominant}"
-            )
-            pct = round(100 * counts.max() / counts.sum(), 1)
+            dom = int(classes[np.argmax(counts)])
+            label = SEDIMENT_LABELS[dom] if 0 <= dom < len(SEDIMENT_LABELS) else f"class {dom}"
             result["layers"][var] = {
                 "name": long_name,
                 "dominant": label,
-                "purity": pct,
+                "purity": round(100 * counts.max() / counts.sum(), 1),
             }
         else:
             result["layers"][var] = {
@@ -271,6 +232,88 @@ async def region_stats(x0: float, y0: float, x1: float, y1: float):
     return result
 
 
+@app.get("/api/profile")
+async def profile(coords: str):
+    """Depth, sediment_class, rl (and isopach if available) along a polyline."""
+    ds = state["ds"]
+    points = coords.split(";")
+
+    keys = [("bathymetry", "depth"), ("sediment_class", "sediment"), ("rl", "rl")]
+    if state["has_isopach"]:
+        keys.append(("isopach", "isopach"))
+
+    result = {key: [] for _, key in keys}
+
+    for pt in points:
+        try:
+            lon, lat = map(float, pt.split(","))
+            x, y = from_ll.transform(lon, lat)
+            xi = int(np.argmin(np.abs(ds.x.values - x)))
+            yi = int(np.argmin(np.abs(ds.y.values - y)))
+
+            for var, key in keys:
+                if var in ds.data_vars:
+                    val = float(ds[var].values[yi, xi])
+                    result[key].append(round(val, 4) if not np.isnan(val) else None)
+                else:
+                    result[key].append(None)
+        except Exception:
+            for _, key in keys:
+                result[key].append(None)
+
+    return result
+
+
+@app.get("/api/3d-scene")
+async def get_3d_scene(x0: float, y0: float, x1: float, y1: float):
+    ds = state["ds"]
+    min_x, max_x = min(x0, x1), max(x0, x1)
+    min_y, max_y = min(y0, y1), max(y0, y1)
+
+    region = ds.sel(x=slice(min_x, max_x), y=slice(max_y, min_y))
+    if region.sizes["x"] == 0 or region.sizes["y"] == 0:
+        return {"error": "No data in selected region"}
+
+    max_grid = 150
+    step = max(1, math.ceil(max(region.sizes["x"], region.sizes["y"]) / max_grid))
+    region_ds = region.isel(x=slice(None, None, step), y=slice(None, None, step))
+    w, h = region_ds.sizes["x"], region_ds.sizes["y"]
+
+    bathy = region_ds["bathymetry"].fillna(region_ds["bathymetry"].mean())
+    bathymetry_1d = bathy.values.flatten().tolist()
+
+    bedrock_1d = None
+    if state["has_isopach"] and "isopach" in region_ds.data_vars:
+        iso = region_ds["isopach"].fillna(0)
+        bedrock_1d = (bathy + iso).values.flatten().tolist()
+
+    sss_texture_1d = None
+    if SSS_HF_TIF and SSS_HF_TIF.exists():
+        try:
+            with rasterio.open(SSS_HF_TIF) as src:
+                window = from_bounds(min_x, min_y, max_x, max_y, transform=src.transform)
+                sss_arr = src.read(1, window=window, out_shape=(h, w))
+                if src.nodata is not None:
+                    sss_arr[sss_arr == src.nodata] = 0
+                lo, hi = np.nanmin(sss_arr), np.nanmax(sss_arr)
+                if hi > lo:
+                    norm = ((sss_arr - lo) / (hi - lo) * 255).astype(np.uint8)
+                    sss_texture_1d = norm[::-1, :].flatten().tolist()
+                else:
+                    sss_texture_1d = [0] * (w * h)
+        except Exception as e:
+            print(f"SSS texture read failed: {e}")
+
+    return {
+        "width": w,
+        "height": h,
+        "step_m": cfg["grid"]["resolution"] * step,
+        "bathymetry": bathymetry_1d,
+        "bedrock": bedrock_1d,
+        "sss_texture": sss_texture_1d,
+    }
+
+
 @app.get("/api/tracklines")
 async def get_tracklines():
     if TRACKLINES_PATH.exists():
@@ -280,132 +323,12 @@ async def get_tracklines():
 
 @app.get("/api/waterfall-index")
 async def get_waterfall_index():
-    index_path = ROOT / "outputs" / "waterfalls" / "index.json"
+    index_path = WATERFALLS_DIR / "index.json"
     if index_path.exists():
         return JSONResponse(json.loads(index_path.read_text()))
     return {"sss": {}, "sbp": {}}
 
-@app.get("/api/depth-profile")
-async def depth_profile(coords: str):
-    """Get depth along a series of coordinates.
-    coords format: lon1,lat1;lon2,lat2;...
-    """
-    points = coords.split(";")
-    depths = []
-    for pt in points:
-        try:
-            lon, lat = map(float, pt.split(","))
-            x, y = from_ll.transform(lon, lat)
-            xi = int(np.argmin(np.abs(ds.x.values - x)))
-            yi = int(np.argmin(np.abs(ds.y.values - y)))
-            val = float(ds["bathymetry"].values[yi, xi])
-            depths.append(round(val, 2) if not np.isnan(val) else None)
-        except:
-            depths.append(None)
-    return {"depths": depths}
 
-
-@app.get("/api/profile")
-async def profile(coords: str):
-    """Get depth, sediment, isopach along a series of coordinates.
-    coords format: lon1,lat1;lon2,lat2;...
-    """
-    points = coords.split(";")
-    result = {"depth": [], "sediment": [], "isopach": [], "rl": []}
-    
-    for pt in points:
-        try:
-            lon, lat = map(float, pt.split(","))
-            x, y = from_ll.transform(lon, lat)
-            xi = int(np.argmin(np.abs(ds.x.values - x)))
-            yi = int(np.argmin(np.abs(ds.y.values - y)))
-            
-            for var, key in [("bathymetry", "depth"), 
-                            ("sediment_class", "sediment"),
-                            ("isopach", "isopach"), 
-                            ("rl", "rl")]:
-                if var in ds.data_vars:
-                    val = float(ds[var].values[yi, xi])
-                    result[key].append(round(val, 4) if not np.isnan(val) else None)
-                else:
-                    result[key].append(None)
-        except:
-            for key in result:
-                result[key].append(None)
-    
-    return result
-
-@app.get("/api/3d-scene")
-async def get_3d_scene(x0: float, y0: float, x1: float, y1: float):
-    # 1. 框選區域
-    min_x, max_x = min(x0, x1), max(x0, x1)
-    min_y, max_y = min(y0, y1), max(y0, y1)
-    
-    region = ds.sel(x=slice(min_x, max_x), y=slice(max_y, min_y))
-
-    if region.sizes['x'] == 0 or region.sizes['y'] == 0:
-        return {"error": "No data in selected region"}
-
-    # 2. 地形降採樣 (保護 3D 效能)
-    max_grid_size = 150
-    step = max(1, math.ceil(max(region.sizes['x'], region.sizes['y']) / max_grid_size))
-    region_downsampled = region.isel(x=slice(None, None, step), y=slice(None, None, step))
-
-    w, h = region_downsampled.sizes['x'], region_downsampled.sizes['y']
-
-    # 3. 抽取地形與基岩
-    bathy_array = region_downsampled['bathymetry'].fillna(region_downsampled['bathymetry'].mean())
-    bathymetry_1d = bathy_array.values.flatten().tolist()
-
-    bedrock_1d = None
-    if 'isopach' in region_downsampled.data_vars:
-        isopach_array = region_downsampled['isopach'].fillna(0)
-        bedrock_array = bathy_array + isopach_array
-        bedrock_1d = bedrock_array.values.flatten().tolist()
-
-    # 4. 🔥 從高解析度 TIF 直接裁切 SSS 紋理 (不透過 Data Cube)
-    sss_texture_1d = None
-    sss_path = TIF_DIR / "sss_imagery_hf.tif" # 指向你的高解析度圖檔
-
-    if sss_path.exists():
-        try:
-            with rasterio.open(sss_path) as src:
-                # 取得該範圍在原圖上的「視窗 (Window)」
-                window = from_bounds(min_x, min_y, max_x, max_y, transform=src.transform)
-                
-                # 直接裁切讀取
-                # 為了跟 3D 網格對齊，我們要求 rasterio 將切出來的圖片縮放到 w * h 大小
-                sss_array = src.read(1, window=window, out_shape=(h, w))
-                
-                # 處理 NoData 並正規化到 0-255
-                nodata = src.nodata
-                if nodata is not None:
-                    sss_array[sss_array == nodata] = 0 # 沒資料就填黑
-                
-                # 防呆：避免整塊都是黑的導致除以零
-                sss_min, sss_max = np.nanmin(sss_array), np.nanmax(sss_array)
-                if sss_max > sss_min:
-                    sss_norm = ((sss_array - sss_min) / (sss_max - sss_min) * 255).astype(np.uint8)
-                    # Rasterio 讀出來的 Y 軸方向跟 Xarray 可能相反，這裡確保與地形對齊
-                    # 如果貼圖上下顛倒，可以把 [::-1, :] 拿掉
-                    sss_texture_1d = sss_norm[::-1, :].flatten().tolist() 
-                else:
-                    # 全黑的情況
-                    sss_texture_1d = [0] * (w * h)
-        except Exception as e:
-            print(f"裁切 SSS 紋理失敗: {e}")
-
-    return {
-        "width": w,
-        "height": h,
-        "step_m": 0.5 * step, 
-        "bathymetry": bathymetry_1d,
-        "bedrock": bedrock_1d,
-        "sss_texture": sss_texture_1d
-    }
-
-
-# ── Run ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"\nViewer: http://localhost:8000")
     print(f"API:    http://localhost:8000/api/layers")
