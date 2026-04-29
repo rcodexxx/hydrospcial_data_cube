@@ -184,7 +184,7 @@ def main():
 
     # Classify on smoothed RL
     sed_flat = np.full(len(grid_pts), -1, dtype=np.int8)
-    valid_rl = np.isfinite(rl_flat)
+    valid_rl = np.isfinite(rl_flat) & valid_grid
     sed_flat[valid_rl] = np.array(
         [classify_sediment(v) for v in rl_flat[valid_rl]], dtype=np.int8
     )

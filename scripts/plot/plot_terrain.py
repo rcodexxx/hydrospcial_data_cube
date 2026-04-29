@@ -1,135 +1,169 @@
-# scripts/plot/plot_terrain.py
 """
-Generate terrain analysis figures for the report.
-  1. Bathymetry with contour lines (turbo)
-  2. VRM - Vector Ruggedness Measure (inferno)
-  3. MBES Coverage / Confidence (binary valid mask)
+Generate MBES-derived terrain figures: VRM, Slope, BPI.
+
+Bathymetry main figure is produced by plot_bathymetry.py (with
+satellite basemap). This script handles the derived terrain layers
+that share a flat-style presentation with bathymetric isobaths
+overlaid for spatial reference.
 """
-
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import rasterio
 from pyproj import Transformer
+from scipy.ndimage import gaussian_filter
+from scipy.ndimage import binary_erosion
 
-ROOT = Path(__file__).parent.parent.parent
-DEM_TIF = ROOT / "outputs/tif/mbes_bathymetry.tif"
-VRM_TIF = ROOT / "outputs/tif/mbes_vrm.tif"
-OUT_DIR = ROOT / "outputs/figures"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-CUT_NORTH = 2449050
+from src.config import ROOT, get_config
 
 
-def read_tif(path):
+# Style constants
+NODATA_FACE = "#cccccc"
+ISOBATH_MAJOR_M = 10
+ISOBATH_MINOR_M = 5
+DEM_SMOOTH_SIGMA_PX = 10
+TICK_FONTSIZE = 8
+
+
+def read_masked(path):
     with rasterio.open(path) as src:
         data = src.read(1).astype(np.float32)
-        nd = src.nodata
-        bounds = src.bounds
-        crs = src.crs
-        res = src.res[0]
-    if nd is not None:
-        data[data == nd] = np.nan
-    return data, bounds, crs, res
+        if src.nodata is not None:
+            data[data == src.nodata] = np.nan
+        return data, src.bounds, src.crs
 
 
-def apply_cut(data, bounds, res):
-    cut_row = int((bounds.top - CUT_NORTH) / res)
-    if cut_row > 0:
-        data[:cut_row, :] = np.nan
-    return data
+def smooth_dem(dem, sigma=DEM_SMOOTH_SIGMA_PX):
+    mask = np.isfinite(dem)
+    filled = np.where(mask, dem, 0.0)
+    sm = gaussian_filter(filled, sigma=sigma)
+    w = gaussian_filter(mask.astype(float), sigma=sigma)
+    return np.where(w > 0.1, sm / np.maximum(w, 1e-10), np.nan)
 
 
-def setup_ax(ax, bounds, crs):
+def add_isobaths(ax, dem, extent, include_minor=False):
+    dem_sm = np.ma.masked_invalid(smooth_dem(dem))
+    depth_max = int(np.ceil(np.nanmax(dem_sm) / ISOBATH_MAJOR_M) * ISOBATH_MAJOR_M)
+
+    if include_minor:
+        minor = [d for d in range(ISOBATH_MINOR_M, depth_max, ISOBATH_MINOR_M)
+                 if d % ISOBATH_MAJOR_M != 0]
+        if minor:
+            ax.contour(dem_sm, levels=minor,
+                       colors="black", linewidths=0.2, alpha=0.25,
+                       extent=extent, origin="upper")
+
+    major = list(range(ISOBATH_MAJOR_M, depth_max, ISOBATH_MAJOR_M))
+    if major:
+        cs = ax.contour(dem_sm, levels=major,
+                        colors="black", linewidths=0.5, alpha=0.6,
+                        extent=extent, origin="upper")
+        ax.clabel(cs, inline=True, fontsize=7, fmt="%d m")
+
+
+def setup_geographic_axes(ax, bounds, crs):
     tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
     mid_x = (bounds.left + bounds.right) / 2
     mid_y = (bounds.bottom + bounds.top) / 2
 
     def fmt_lon(val, _):
         lon, _ = tr.transform(val, mid_y)
-        d = int(abs(lon))
-        m = (abs(lon) - d) * 60
+        d, m = int(abs(lon)), (abs(lon) % 1) * 60
         return f"{d}°{m:05.2f}′E"
 
     def fmt_lat(val, _):
         _, lat = tr.transform(mid_x, val)
-        d = int(abs(lat))
-        m = (abs(lat) - d) * 60
+        d, m = int(abs(lat)), (abs(lat) % 1) * 60
         return f"{d}°{m:05.2f}′N"
 
     ax.set_xticks(np.linspace(bounds.left, bounds.right, 4))
     ax.set_yticks(np.linspace(bounds.bottom, bounds.top, 4))
     ax.xaxis.set_major_formatter(mticker.FuncFormatter(fmt_lon))
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(fmt_lat))
-    ax.tick_params(axis="x", labelsize=8, rotation=25)
-    ax.tick_params(axis="y", labelsize=8)
+    ax.tick_params(axis="x", labelsize=TICK_FONTSIZE)
+    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+
+
+def mask_to_dem(arr, dem):
+    return np.where(np.isfinite(dem), arr, np.nan)
+
+
+def plot_layer(arr, dem, bounds, crs, title, label,
+               cmap, vmin, vmax, out_path, divergent=False):
+    arr = mask_to_dem(arr, dem)
+    extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+
+    fig, ax = plt.subplots(figsize=(11, 7.5))
+    ax.set_facecolor(NODATA_FACE)
+
+    im = ax.imshow(
+        arr, extent=extent, origin="upper",
+        cmap=cmap, vmin=vmin, vmax=vmax,
+        aspect="equal", interpolation="bilinear",
+    )
+
+    add_isobaths(ax, dem, extent)
+
+    cb = plt.colorbar(im, ax=ax, shrink=0.75, pad=0.02)
+    cb.set_label(label, fontsize=10)
+
+    # ax.set_title(title, fontsize=13)
+    setup_geographic_axes(ax, bounds, crs)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    valid = arr[np.isfinite(arr)]
+    if valid.size:
+        print(f"  Saved: {out_path.name}  range "
+              f"{valid.min():+.3f} ~ {valid.max():+.3f}, "
+              f"std={valid.std():.3f}, clip [{vmin}, {vmax}]")
 
 
 def main():
-    dem, bounds, crs, res = read_tif(DEM_TIF)
-    vrm, _, _, _ = read_tif(VRM_TIF)
+    cfg = get_config()
+    mbes_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
+    vrm_tif = ROOT / cfg["mbes"]["vrm_tif"]
+    slope_tif = ROOT / cfg["mbes"]["slope_tif"]
+    bpi_tif = ROOT / cfg["mbes"]["bpi_tif"]
 
-    dem = apply_cut(dem, bounds, res)
-    vrm = apply_cut(vrm, bounds, res)
+    out_dir = ROOT / "outputs/figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
-    H, W = dem.shape
+    dem, bounds, crs = read_masked(mbes_tif)
+    vrm, _, _ = read_masked(vrm_tif)
+    slope, _, _ = read_masked(slope_tif)
+    bpi, _, _ = read_masked(bpi_tif)
 
-    # grid for contour
-    xs = np.linspace(bounds.left, bounds.right, W)
-    ys = np.linspace(bounds.top, bounds.bottom, H)
-    X, Y = np.meshgrid(xs, ys)
-
-    # ── Figure 1: Bathymetry + Contours ───────────────────────
-    fig1, ax1 = plt.subplots(figsize=(10, 8))
-
-    # filled background
-    im = ax1.imshow(dem, extent=extent, origin="upper", cmap="turbo_r", aspect="equal")
-    cb = plt.colorbar(im, ax=ax1, shrink=0.75, pad=0.02)
-    cb.set_label("Depth (m, positive down)", fontsize=10)
-
-    # contour lines
-    dem_smooth = np.where(np.isfinite(dem), dem, np.nan)
-    levels = np.arange(
-        np.floor(np.nanmin(dem) / 5) * 5, np.ceil(np.nanmax(dem) / 5) * 5 + 1, 5
-    )
-    cs = ax1.contour(
-        X, Y, dem_smooth, levels=levels, colors="black", linewidths=0.6, alpha=0.7
-    )
-    ax1.clabel(cs, fmt="%d m", fontsize=7, inline=True)
-
-    ax1.set_title("Mudan Reservoir — Bathymetry", fontsize=13)
-    ax1.set_facecolor("#cccccc")
-    setup_ax(ax1, bounds, crs)
-    plt.tight_layout()
-    plt.savefig(OUT_DIR / "terrain_bathymetry.png", dpi=200, bbox_inches="tight")
-    print(f"Saved: {OUT_DIR / 'terrain_bathymetry.png'}")
-
-    # ── Figure 2: VRM ─────────────────────────────────────────
-    fig2, ax2 = plt.subplots(figsize=(10, 8))
-
-    im = ax2.imshow(
-        vrm,
-        extent=extent,
-        origin="upper",
+    print("Generating terrain figures...")
+    plot_layer(
+        vrm, dem, bounds, crs,
+        title="Mudan Reservoir — Vector Ruggedness Measure",
+        label="VRM",
         cmap="viridis",
-        vmin=0,
-        vmax=0.1,
-        aspect="equal",
+        vmin=0, vmax=float(np.nanpercentile(vrm, 98)),
+        out_path=out_dir / "terrain_vrm.png",
     )
-    cb = plt.colorbar(im, ax=ax2, shrink=0.75, pad=0.02)
-    cb.set_label("VRM", fontsize=10)
+    plot_layer(
+        slope, dem, bounds, crs,
+        title="Mudan Reservoir — Slope",
+        label="Slope (degree)",
+        cmap="magma",
+        vmin=0, vmax=float(np.nanpercentile(slope, 98)),
+        out_path=out_dir / "terrain_slope.png",
+    )
 
-    ax2.set_title("Mudan Reservoir — Vector Ruggedness Measure", fontsize=13)
-    ax2.set_facecolor("#cccccc")
-    setup_ax(ax2, bounds, crs)
-    plt.tight_layout()
-    plt.savefig(OUT_DIR / "terrain_vrm.png", dpi=200, bbox_inches="tight")
-    print(f"Saved: {OUT_DIR / 'terrain_vrm.png'}")
-
-    plt.show()
+    bpi_clip = float(np.nanpercentile(np.abs(bpi), 98))
+    plot_layer(
+        bpi, dem, bounds, crs,
+        title="Mudan Reservoir — Bathymetric Position Index",
+        label="BPI (m)",
+        cmap="RdBu_r",
+        vmin=-bpi_clip, vmax=bpi_clip,
+        out_path=out_dir / "terrain_bpi.png",
+        divergent=True,
+    )
 
 
 if __name__ == "__main__":

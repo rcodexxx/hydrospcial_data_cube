@@ -83,7 +83,7 @@ def _render(data, bounds, tr_to_wgs84, out_path, title, plot_type, n_clusters=No
     cax = div.append_axes("right", size="4%", pad=0.05)
     plt.colorbar(im, cax=cax, label=cbar_label, ticks=cbar_ticks)
 
-    ax.set_title(title, fontsize=14, fontweight="bold")
+    # ax.set_title(title, fontsize=14, fontweight="bold")
     _setup_latlon_axes(ax, bounds, tr_to_wgs84)
     plt.tight_layout()
 

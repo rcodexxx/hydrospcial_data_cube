@@ -212,26 +212,6 @@ def main():
         print(f"  n_clusters:  {diag.get('n_clusters', 0)}")
         print(f"  noise ratio: {diag.get('noise_ratio', 0):.2%}")
 
-     # ── Stage 3b: Cross-swath leveling (full mode only) ──
-    if args.mode == "full":
-        from src.sss.correction import level_swaths
-        t3a = time.time()
-        correction_result["bs_db"], offsets = level_swaths(   # ← 接 offsets
-            correction_result["bs_db"],
-            pooled["lon"], pooled["lat"],
-            pooled["line_id"], pooled["channel_id"],
-            resolution=cfg["grid"]["resolution"],
-            epsg=cfg["grid"]["epsg"],
-        )
-        print(f"Leveling done in {time.time()-t3a:.1f}s")
-        
-        # Post-leveling BS diagnostic
-        valid = np.isfinite(correction_result["bs_db"])
-        bs_lev = correction_result["bs_db"][valid]
-        print(f"Post-leveling BS: p5={np.percentile(bs_lev, 5):.2f}, "
-              f"median={np.median(bs_lev):.2f}, "
-              f"p95={np.percentile(bs_lev, 95):.2f} dB")
-
     # ── Stage 4: Mosaic ──────────────────────────────────
     t3 = time.time()
     print(f"\nMosaicking → {bs_tif.name}")

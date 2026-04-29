@@ -1,4 +1,3 @@
-# scripts/build/build_mbes_bathymetry.py
 """
 Build MBES bathymetry DEM from XYZ point cloud.
 
@@ -6,19 +5,17 @@ Steps:
     1. Read XYZ txt → grid (bin averaging)
     2. Sign correction (positive-down)
     3. Edge erosion (remove boundary artefacts)
-    4. Save GeoTIFF + write grid bounds back to mudan.yaml
+    4. Save GeoTIFF
 """
 import numpy as np
 import pandas as pd
 import rasterio
-import yaml
 from rasterio.crs import CRS
 from rasterio.transform import from_origin
 from scipy.ndimage import binary_erosion
 
-from src.config import CFG, ROOT, RESOLUTION, EPSG
+from src.config import get_config, ROOT
 
-CONFIG_PATH = ROOT / "configs/mudan.yaml"
 EDGE_SHRINK = 5
 
 
@@ -32,45 +29,72 @@ def _xyz_to_grid(df, resolution):
     df = df.copy()
     df["x"] = df["x"].round(3)
     df["y"] = df["y"].round(3)
-    df["z"] = np.abs(df["z"])  # positive-down
+    df["z"] = np.abs(df["z"])
 
     grid_df = df.pivot(index="y", columns="x", values="z").sort_index(ascending=False)
-    dem     = grid_df.values.astype(np.float32)
-    min_x   = grid_df.columns.min()
-    max_y   = grid_df.index.max()
+    dem = grid_df.values.astype(np.float32)
+    min_x = grid_df.columns.min()
+    max_y = grid_df.index.max()
 
-    print(f"  Grid: {dem.shape[0]}x{dem.shape[1]} px, res={resolution}m")
-    print(f"  X: {min_x:.1f} ~ {grid_df.columns.max():.1f}")
-    print(f"  Y: {grid_df.index.min():.1f} ~ {max_y:.1f}")
-    print(f"  Depth: {np.nanmin(dem):.2f} ~ {np.nanmax(dem):.2f} m")
-
+    print(f"  Grid : {dem.shape[0]} x {dem.shape[1]} px @ {resolution} m/px")
     transform = from_origin(min_x, max_y, resolution, resolution)
     return dem, transform
 
 
 def _erode_edges(dem, resolution):
-    valid    = ~np.isnan(dem)
-    struct   = np.ones((EDGE_SHRINK * 2 + 1, EDGE_SHRINK * 2 + 1), dtype=bool)
+    valid = ~np.isnan(dem)
+    struct = np.ones((EDGE_SHRINK * 2 + 1, EDGE_SHRINK * 2 + 1), dtype=bool)
     interior = binary_erosion(valid, structure=struct)
-    removed  = np.sum(valid & ~interior)
+    removed = int(np.sum(valid & ~interior))
     dem[~interior] = np.nan
-    print(f"  Edge erosion: removed {removed:,} px ({EDGE_SHRINK}px = {EDGE_SHRINK * resolution}m)")
+    print(f"  Edge erosion: removed {removed:,} px "
+          f"({EDGE_SHRINK}px = {EDGE_SHRINK * resolution} m)")
     return dem
 
 
+def _print_summary(dem, transform, resolution):
+    valid = dem[np.isfinite(dem)]
+    n_valid = valid.size
+    n_total = dem.size
+    h, w = dem.shape
+
+    left = transform.c
+    top = transform.f
+    right = left + w * resolution
+    bottom = top - h * resolution
+
+    print("\nSummary")
+    print(f"  Bounds  : left={left:.1f}  right={right:.1f}  "
+          f"bottom={bottom:.1f}  top={top:.1f}")
+    print(f"  Coverage: {100 * n_valid / n_total:.1f}% "
+          f"({n_valid:,} / {n_total:,} px)")
+    if n_valid:
+        print(f"  Depth   : min={valid.min():.2f} m  "
+              f"max={valid.max():.2f} m  "
+              f"median={np.median(valid):.2f} m  "
+              f"mean={valid.mean():.2f} m")
+
+    print("\nCopy to configs/<site>.yaml under grid.bounds:")
+    print(f"  bounds:")
+    print(f"    left:   {round(left, 3)}")
+    print(f"    right:  {round(right, 3)}")
+    print(f"    bottom: {round(bottom, 3)}")
+    print(f"    top:    {round(top, 3)}")
+
+
 def main():
-    mbes       = CFG["instruments"]["mbes"]
-    src_xyz    = ROOT / mbes["source"]
-    out_tif    = ROOT / mbes["out_tif"]
-    resolution = RESOLUTION
-    epsg       = EPSG
+    cfg = get_config()
+    src_xyz = ROOT / cfg["mbes"]["source"]
+    out_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
+    resolution = cfg["grid"]["resolution"]
+    epsg = cfg["grid"]["epsg"]
 
     out_tif.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Reading: {src_xyz.name}")
-    df             = _read_xyz(src_xyz)
+    df = _read_xyz(src_xyz)
     dem, transform = _xyz_to_grid(df, resolution)
-    dem            = _erode_edges(dem, resolution)
+    dem = _erode_edges(dem, resolution)
 
     out = np.where(np.isfinite(dem), dem, -9999.0).astype(np.float32)
     with rasterio.open(out_tif, "w", driver="GTiff",
@@ -82,19 +106,7 @@ def main():
         dst.write(out, 1)
     print(f"Saved: {out_tif}")
 
-    # write bounds back to config
-    with rasterio.open(out_tif) as dst:
-        b = dst.bounds
-
-    cfg = yaml.safe_load(CONFIG_PATH.read_text())
-    cfg["grid"]["bounds"] = {
-        "left":   round(b.left,   3),
-        "right":  round(b.right,  3),
-        "bottom": round(b.bottom, 3),
-        "top":    round(b.top,    3),
-    }
-    CONFIG_PATH.write_text(yaml.dump(cfg, allow_unicode=True, sort_keys=False))
-    print(f"Grid bounds written to {CONFIG_PATH.name}")
+    _print_summary(dem, transform, resolution)
 
 
 if __name__ == "__main__":

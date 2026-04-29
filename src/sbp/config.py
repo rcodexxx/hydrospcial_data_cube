@@ -19,13 +19,25 @@ CC_TIGHT_WIN_SAMPLES = 50      # BSB search window around 2×idx_B
 CC_MIN_BSB_RATIO = 0.05        # BSB echo must be at least 5% of B amplitude
 
 # ──────────────────────────────────────────────────────────
-# CC calibration (segment selection)
+# CC calibration — segment selection criteria
+#
+# Physical reasoning for each parameter:
+#   - VRM/slope/BPI: multi-scale terrain flatness (smooth-interface
+#     condition required by Huang & Liu 2015)
+#   - depth_std:     within-segment depth uniformity
+#   - amp_CV:        within-segment substrate uniformity (the BSB method
+#                    assumes B and BSB reflect off the same homogeneous
+#                    substrate; high CV violates this assumption)
+#   - min_start_ping: skip warm-up at the beginning of each survey line
+#                    (gain stabilisation, towfish attitude)
 # ──────────────────────────────────────────────────────────
-CC_MIN_CONSEC_PINGS = 30        # min consecutive good pings per segment
-CC_VRM_PERCENTILE = 25           # VRM threshold percentile (flat regions)
-CC_DEPTH_STD_MAX = 0.5          # m, max depth std within segment
-CC_MIN_SAMPLES_PER_SEG = 10      # min valid CC estimates per segment
-CC_TOP_N_SEGMENTS = 3            # number of best segments to combine
+CC_MIN_CONSEC_PINGS = 100       # min consecutive good pings per segment
+CC_VRM_PERCENTILE = 20           # VRM threshold percentile
+CC_SLOPE_MAX_DEG = 6.0           # max local slope (degrees)
+CC_BPI_ABS_MAX = 0.3             # max abs(BPI) (m, ±0.3 m around mean)
+CC_DEPTH_STD_MAX = 0.5           # max depth std within segment (m)
+CC_AMP_CV_MAX = 0.35             # max amp_b coefficient of variation in segment
+CC_MIN_START_PING = 50           # skip first N pings of each file (warm-up)
 
 # ──────────────────────────────────────────────────────────
 # RL post-processing
@@ -47,9 +59,9 @@ RF_MIN_SAMPLES_LEAF = 5
 # ──────────────────────────────────────────────────────────
 SBR_BLIND_ZONE_M = 0.15          # skip this much below bottom (saturation)
 SBR_MAX_DEPTH_M = 4.0            # max sediment depth to search
-SBR_PROMINENCE_DB = 3.0          # peak prominence threshold
+SBR_PROMINENCE_DB = 3.0           # peak prominence threshold
 SBR_MIN_WIDTH = 2                # min peak width in samples
-SONAR_DRAFT_M = 1.04             # transducer draft (assumed fixed, TODO: read from ping)
+SONAR_DRAFT_M = 1.04             # transducer draft (assumed fixed)
 SBR_MULTIPLE_REJECT_M = 0.15     # reject picks within this range of sonar draft
 
 # Thickness bounds
@@ -60,7 +72,7 @@ THICK_MAX_M = 3.0                # reservoir-specific upper bound
 # IDW interpolation (isopach)
 # ──────────────────────────────────────────────────────────
 IDW_MAX_GAP_M = 70.0             # max gap between tracklines for interp
-IDW_K_NEIGHBORS = 12             # typical value (was 200, too many)
+IDW_K_NEIGHBORS = 12              # typical value (was 200, too many)
 IDW_EPS = 1e-6                    # regularization to avoid /0
 
 # ──────────────────────────────────────────────────────────

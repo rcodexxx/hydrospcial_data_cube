@@ -1,152 +1,252 @@
 """
-Generate magnetometer anomaly figure with trackline overlay.
+Build magnetometer layers: anomaly, background, and residual.
 
-Background, residual, and confidence layers are computed in the
-pipeline (build_mag_anomaly.py) but not visualized here:
-  - Background field is uniform for Mudan Reservoir (σ = 3.6 nT)
-  - Residual ≈ anomaly because background is negligible
-  - Confidence is uniformly interpolated for dense surveys
-The pipeline tools remain available for other sites.
+Workflow:
+  1. Read .mag files; filter by quality + IGRF tolerance
+  2. Apply IGRF correction per survey date
+  3. Along-track median filter
+       - WIN_BG  → background field (local anomalies removed)
+       - WIN_ANOM → anomaly field (electronic noise removed)
+  4. IDW interpolation to MBES grid within MAX_EXTRAP_M of tracks
+  5. Gaussian low-pass on background
+  6. Residual = anomaly - smoothed background
+
+Outputs:
+  mag_anomaly.tif    : anomaly field (F - IGRF, anomaly-window medfilt)
+  mag_background.tif : long-wavelength magnetic background (nT)
+  mag_residual.tif   : anomaly - background (UCH target detection)
+  mag_confidence.tif : 0=measured, 1=interpolated, 255=nodata
 """
 from datetime import datetime
 
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
+import ppigrf
 import rasterio
-from pyproj import Transformer
 from scipy.ndimage import gaussian_filter
+from scipy.signal import medfilt
+from scipy.spatial import KDTree
+from tqdm import tqdm
 
 from src.config import get_config, ROOT
 from src.mag.read_mag import read_mag
+from src.mag.config import (
+    QUALITY_MIN, F_TOLERANCE, BG_OUTLIER_SIGMA,
+    WIN_BG, WIN_ANOM,
+    MAX_EXTRAP_M, IDW_POWER, IDW_NEIGHBORS, IDW_CHUNK,
+    SMOOTH_M, SMOOTH_WEIGHT_THRESHOLD,
+)
 
 
-CMAP_DIVERGING = "RdBu_r"
-COLOR_CLIP_PERCENTILE = 98
-COLOR_ROUND_TO = 5
-NODATA_FACE = "#cccccc"
-
-ISOBATH_MAJOR_M = 10
-DEM_SMOOTH_SIGMA_PX = 10
-TICK_FONTSIZE = 8
-
-TRACKLINE_COLOR = "#222222"
-TRACKLINE_LINEWIDTH = 0.3
-TRACKLINE_ALPHA = 0.4
+def get_igrf(lat, lon, date):
+    Be, Bn, Bu = ppigrf.igrf(lon, lat, 0.0, date)
+    return float(np.sqrt(np.array(Be) ** 2 +
+                         np.array(Bn) ** 2 +
+                         np.array(Bu) ** 2).item())
 
 
-def read_masked(path):
-    with rasterio.open(path) as src:
-        data = src.read(1).astype(np.float32)
-        nd = src.nodata
-        bounds = src.bounds
-        crs = src.crs
-    if nd is not None:
-        data[data == nd] = np.nan
-    return data, bounds, crs
+def idw(query_pts, known_pts, known_vals, k, power):
+    tree = KDTree(known_pts)
+    dists, idxs = tree.query(query_pts, k=k)
+    dists = np.maximum(dists, 1e-6)
+    w = 1.0 / dists ** power
+    w /= w.sum(axis=1, keepdims=True)
+    return (w * known_vals[idxs]).sum(axis=1)
 
 
-def smooth_dem(dem, sigma=DEM_SMOOTH_SIGMA_PX):
-    mask = np.isfinite(dem)
-    filled = np.where(mask, dem, 0.0)
-    sm = gaussian_filter(filled, sigma=sigma)
-    w = gaussian_filter(mask.astype(float), sigma=sigma)
-    return np.where(w > 0.1, sm / np.maximum(w, 1e-10), np.nan)
+def medfilt_safe(arr, window):
+    """Median filter with odd window size, capped at array length."""
+    n = min(window, len(arr))
+    if n % 2 == 0:
+        n -= 1
+    return medfilt(arr, kernel_size=n)
 
 
-def add_isobaths(ax, dem, extent):
-    if dem is None:
-        return
-    dem_sm = np.ma.masked_invalid(smooth_dem(dem))
-    depth_max = int(np.ceil(np.nanmax(dem_sm) / ISOBATH_MAJOR_M) * ISOBATH_MAJOR_M)
-    major = list(range(ISOBATH_MAJOR_M, depth_max, ISOBATH_MAJOR_M))
-    if not major:
-        return
-    cs = ax.contour(dem_sm, levels=major,
-                    colors="black", linewidths=0.5, alpha=0.6,
-                    extent=extent, origin="upper")
-    ax.clabel(cs, inline=True, fontsize=7, fmt="%d m")
+def load_and_filter(survey_dirs, lat_c, lon_c):
+    bg_x, bg_y, bg_v = [], [], []
+    anom_x, anom_y, anom_v = [], [], []
+    n_total_raw = n_total_kept = 0
 
-
-def setup_geographic_axes(ax, bounds, crs):
-    tr = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-    mid_x = (bounds.left + bounds.right) / 2
-    mid_y = (bounds.bottom + bounds.top) / 2
-
-    def fmt_lon(val, _):
-        lon, _ = tr.transform(val, mid_y)
-        d, m = int(abs(lon)), (abs(lon) % 1) * 60
-        return f"{d}°{m:05.2f}′E"
-
-    def fmt_lat(val, _):
-        _, lat = tr.transform(mid_x, val)
-        d, m = int(abs(lat)), (abs(lat) % 1) * 60
-        return f"{d}°{m:05.2f}′N"
-
-    ax.set_xticks(np.linspace(bounds.left, bounds.right, 4))
-    ax.set_yticks(np.linspace(bounds.bottom, bounds.top, 4))
-    ax.xaxis.set_major_formatter(mticker.FuncFormatter(fmt_lon))
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(fmt_lat))
-    ax.tick_params(axis="x", labelsize=TICK_FONTSIZE, rotation=25)
-    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
-    ax.grid(True, color="white", linewidth=0.4, alpha=0.5, linestyle="--")
-
-
-def load_track_points(survey_dirs):
-    all_x, all_y = [], []
     for entry in survey_dirs:
         mag_dir = ROOT / entry["path"]
-        for f in sorted(mag_dir.glob("*.mag")):
-            recs = read_mag(f, apply_layback=True)
-            all_x.extend(r["x"] for r in recs)
-            all_y.extend(r["y"] for r in recs)
-    return np.array(all_x), np.array(all_y)
+        date = datetime.strptime(entry["date"], "%Y-%m-%d")
+        f_igrf = get_igrf(lat_c, lon_c, date)
+        f_lo = f_igrf * (1 - F_TOLERANCE)
+        f_hi = f_igrf * (1 + F_TOLERANCE)
+
+        print(f"\n{mag_dir.name}: IGRF={f_igrf:.1f} nT  "
+              f"valid F range=[{f_lo:.0f}, {f_hi:.0f}]")
+
+        for mag_file in tqdm(sorted(mag_dir.glob("*.mag")),
+                             desc=f"  {mag_dir.name}"):
+            records = read_mag(mag_file, apply_layback=True)
+            if len(records) < WIN_BG:
+                continue
+
+            xs = np.array([r["x"] for r in records])
+            ys = np.array([r["y"] for r in records])
+            f_arr = np.array([r["F_nT"] for r in records])
+            q = np.array([r["quality"] for r in records])
+            n_total_raw += len(records)
+
+            ok = (q >= QUALITY_MIN) & (f_arr >= f_lo) & (f_arr <= f_hi)
+            if ok.sum() < WIN_BG:
+                continue
+
+            xs, ys, f_arr = xs[ok], ys[ok], f_arr[ok]
+            n_total_kept += len(xs)
+
+            anom_raw = f_arr - f_igrf
+            anom_bg_filt = medfilt_safe(anom_raw, WIN_BG)
+            anom_an_filt = medfilt_safe(anom_raw, WIN_ANOM)
+
+            bg_x.extend(xs); bg_y.extend(ys); bg_v.extend(anom_bg_filt)
+            anom_x.extend(xs); anom_y.extend(ys); anom_v.extend(anom_an_filt)
+
+    print(f"\nTotal records: {n_total_raw} raw → {n_total_kept} kept "
+          f"({100*n_total_kept/max(n_total_raw,1):.1f}%)")
+
+    return (np.array(bg_x), np.array(bg_y), np.array(bg_v),
+            np.array(anom_x), np.array(anom_y), np.array(anom_v))
 
 
 def main():
     cfg = get_config()
+    mag_cfg = cfg["mag"]
+    lat_c = float(mag_cfg["igrf_center"]["lat"])
+    lon_c = float(mag_cfg["igrf_center"]["lon"])
+
+    out_bg = ROOT / mag_cfg["outputs"]["background_tif"]
+    out_an = ROOT / mag_cfg["outputs"]["anomaly_tif"]
+    out_re = ROOT / mag_cfg["outputs"]["residual_tif"]
+    out_cf = ROOT / mag_cfg["outputs"]["confidence_tif"]
     mbes_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
-    an_tif = ROOT / cfg["mag"]["outputs"]["anomaly_tif"]
 
-    out_dir = ROOT / "outputs/figures"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "mag_anomaly.png"
+    # ── 1. Load and filter ────────────────────────────────
+    print("1. Loading and filtering MAG records...")
+    bg_x, bg_y, bg_v, anom_x, anom_y, anom_v = load_and_filter(
+        mag_cfg["survey_dirs"], lat_c, lon_c
+    )
 
-    dem, bounds, crs = read_masked(mbes_tif)
-    an, _, _ = read_masked(an_tif)
-    an = np.where(np.isfinite(dem), an, np.nan)
+    # Background outlier removal
+    bg_std = bg_v.std()
+    bg_keep = np.abs(bg_v) < BG_OUTLIER_SIGMA * bg_std
+    bg_x, bg_y, bg_v = bg_x[bg_keep], bg_y[bg_keep], bg_v[bg_keep]
+    bg_pts = np.column_stack([bg_x, bg_y])
+    anom_pts = np.column_stack([anom_x, anom_y])
 
-    valid = an[np.isfinite(an)]
-    abs_clip = float(np.nanpercentile(np.abs(valid), COLOR_CLIP_PERCENTILE))
-    vmax = max(np.ceil(abs_clip / COLOR_ROUND_TO) * COLOR_ROUND_TO, COLOR_ROUND_TO)
-    extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+    print(f"\nBackground pts : {len(bg_x)} "
+          f"(removed {(~bg_keep).sum()} outliers)  "
+          f"std={bg_v.std():.1f} nT")
+    print(f"Anomaly pts    : {len(anom_x)}  std={anom_v.std():.1f} nT")
 
-    print(f"Loading tracklines for overlay...")
-    tx, ty = load_track_points(cfg["mag"]["survey_dirs"])
+    # ── 2. Load MBES grid ─────────────────────────────────
+    print("\n2. Loading MBES grid geometry...")
+    with rasterio.open(mbes_tif) as src:
+        profile = src.profile.copy()
+        transform = src.transform
+        height, width = src.height, src.width
+        mbes_data = src.read(1)
+        mbes_nodata = src.nodata
 
-    fig, ax = plt.subplots(figsize=(11, 7.5))
-    ax.set_facecolor(NODATA_FACE)
+    res = transform.a
+    xs_grid = transform.c + (np.arange(width) + 0.5) * res
+    ys_grid = transform.f + (np.arange(height) + 0.5) * (-res)
+    gx, gy = np.meshgrid(xs_grid, ys_grid)
+    grid_pts = np.column_stack([gx.ravel(), gy.ravel()])
 
-    im = ax.imshow(an, extent=extent, origin="upper",
-                   cmap=CMAP_DIVERGING, vmin=-vmax, vmax=vmax,
-                   aspect="equal", interpolation="bilinear")
-    add_isobaths(ax, dem, extent)
+    valid_grid = (
+        (mbes_data != mbes_nodata).ravel()
+        if mbes_nodata is not None
+        else np.isfinite(mbes_data).ravel()
+    )
 
-    ax.scatter(tx, ty, color=TRACKLINE_COLOR,
-               s=TRACKLINE_LINEWIDTH, alpha=TRACKLINE_ALPHA,
-               linewidths=0, zorder=2)
+    # Distance mask: only interpolate within MAX_EXTRAP_M of tracks
+    print(f"\n3. Distance mask (MAX_EXTRAP_M = {MAX_EXTRAP_M:.0f} m)...")
+    bg_tree = KDTree(bg_pts)
+    dist, _ = bg_tree.query(grid_pts[valid_grid], k=1)
+    within = dist <= MAX_EXTRAP_M
+    vg_idx = np.where(valid_grid)[0]
+    valid_grid[vg_idx[~within]] = False
 
-    cb = plt.colorbar(im, ax=ax, shrink=0.75, pad=0.02)
-    cb.set_label("Magnetic Anomaly (nT)", fontsize=10)
-    ax.set_title("Mudan Reservoir — Magnetic Anomaly", fontsize=13)
-    setup_geographic_axes(ax, bounds, crs)
+    n_mbes = (mbes_data != mbes_nodata).sum()
+    print(f"  Valid grid pts: {valid_grid.sum()} "
+          f"({100*valid_grid.sum()/n_mbes:.1f}% of MBES coverage)")
 
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    valid_indices = np.where(valid_grid)[0]
 
-    print(f"Saved: {out_path.name}  range {valid.min():+.1f}~{valid.max():+.1f} nT, "
-          f"std={valid.std():.1f} nT, clip ±{vmax:.0f} nT, n_tracks={len(tx)}")
+    # ── 4. IDW interpolation: background + anomaly ───────
+    print("\n4. IDW interpolation...")
+    bg_grid = np.full(len(grid_pts), np.nan)
+    for i in tqdm(range(0, len(valid_indices), IDW_CHUNK), desc="  background"):
+        idx = valid_indices[i:i + IDW_CHUNK]
+        bg_grid[idx] = idw(grid_pts[idx], bg_pts, bg_v,
+                           k=IDW_NEIGHBORS, power=IDW_POWER)
+    bg_2d = bg_grid.reshape(height, width).astype(np.float32)
+
+    anom_grid = np.full(len(grid_pts), np.nan)
+    for i in tqdm(range(0, len(valid_indices), IDW_CHUNK), desc="  anomaly"):
+        idx = valid_indices[i:i + IDW_CHUNK]
+        anom_grid[idx] = idw(grid_pts[idx], anom_pts, anom_v,
+                             k=IDW_NEIGHBORS, power=IDW_POWER)
+    anom_2d = anom_grid.reshape(height, width).astype(np.float32)
+
+    # ── 5. Gaussian low-pass on background ───────────────
+    sigma_px = SMOOTH_M / res
+    print(f"\n5. Gaussian low-pass on background "
+          f"(σ = {sigma_px:.0f} px = {SMOOTH_M:.0f} m)...")
+    bg_valid = np.isfinite(bg_2d)
+    bg_filled = np.where(bg_valid, bg_2d, 0.0)
+    bg_smooth = gaussian_filter(bg_filled, sigma=sigma_px)
+    weight = gaussian_filter(bg_valid.astype(float), sigma=sigma_px)
+    bg_smooth = np.where(weight > SMOOTH_WEIGHT_THRESHOLD,
+                         bg_smooth / weight, np.nan)
+    bg_smooth = np.where(bg_valid, bg_smooth, np.nan).astype(np.float32)
+
+    # ── 6. Residual = anomaly - background ───────────────
+    residual_2d = np.where(
+        np.isfinite(anom_2d) & np.isfinite(bg_smooth),
+        anom_2d - bg_smooth, np.nan,
+    ).astype(np.float32)
+
+    # ── 7. Confidence layer ──────────────────────────────
+    print("\n6. Confidence mask...")
+    conf_flat = np.full(len(grid_pts), 255, dtype=np.uint8)
+    an_tree = KDTree(anom_pts)
+    dist_v, _ = an_tree.query(grid_pts[valid_grid], k=1)
+    conf_flat[valid_grid] = np.where(dist_v <= res, 0, 1).astype(np.uint8)
+    conf_2d = conf_flat.reshape(height, width)
+
+    # ── 8. Write GeoTIFFs ─────────────────────────────────
+    print("\n7. Saving GeoTIFFs...")
+    tif_kwargs = dict(
+        driver="GTiff", count=1,
+        height=height, width=width,
+        crs=profile["crs"], transform=transform,
+    )
+
+    for path, arr, label in [
+        (out_an, anom_2d,    "Anomaly"),
+        (out_bg, bg_smooth,  "Background"),
+        (out_re, residual_2d, "Residual"),
+    ]:
+        out = np.where(np.isfinite(arr), arr, -9999.0).astype(np.float32)
+        with rasterio.open(path, "w", dtype="float32",
+                           nodata=-9999.0, **tif_kwargs) as dst:
+            dst.write(out, 1)
+        v = arr[np.isfinite(arr)]
+        print(f"  {path.name:<22} {label:<11} "
+              f"{v.min():+.1f} ~ {v.max():+.1f} nT  std={v.std():.1f} nT")
+
+    with rasterio.open(out_cf, "w", dtype="uint8",
+                       nodata=255, **tif_kwargs) as dst:
+        dst.write(conf_2d, 1)
+
+    measured = (conf_2d[conf_2d != 255] == 0).sum()
+    interpolated = (conf_2d[conf_2d != 255] == 1).sum()
+    total_c = measured + interpolated
+    print(f"  {out_cf.name:<22} measured={measured} "
+          f"({100*measured/max(total_c,1):.1f}%), "
+          f"interpolated={interpolated} ({100*interpolated/max(total_c,1):.1f}%)")
 
 
 if __name__ == "__main__":
