@@ -25,6 +25,8 @@ from src.sss.config import (
     HEADING_RATE_THRESHOLD_DEG_S,
     ALTITUDE_MEDIAN_FILTER_WINDOW,
     ALTITUDE_OUTLIER_RATIO,
+    get_far_cutoff,
+    NADIR_CUTOFF_DEG
 )
 from src.sss.read_sss_jsf import read_sss_jsf
 
@@ -266,8 +268,9 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
         amps = cd["amps"][i].astype(np.float32)
 
         slant = np.arange(len(amps), dtype=np.float32) * pix_m
-        min_slant = altitude / np.cos(np.deg2rad(15.0))
-        max_slant = altitude / np.cos(np.deg2rad(70.0))
+        far_cutoff = get_far_cutoff(channel)
+        min_slant = altitude / np.cos(np.deg2rad(NADIR_CUTOFF_DEG))
+        max_slant = altitude / np.cos(np.deg2rad(far_cutoff))
         mask = (slant > min_slant) & (slant < max_slant)
         if not mask.any():
             continue
