@@ -16,7 +16,6 @@ NADIR_CUTOFF_DEG = 15.0      # samples below this angle are discarded
 FAR_CUTOFF_HF = 76.0
 FAR_CUTOFF_LF = 70.0
 
-
 # ── Angular waterfall binning ────────────────────────────────
 ANGLE_MIN_DEG      = 20.0
 ANGLE_MAX_DEG      = 70.0
