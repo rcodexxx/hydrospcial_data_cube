@@ -14,7 +14,6 @@ from src.sss.config import (
     MOSAIC_FAR_ANGLE_PENALTY,
     IDW_SEARCH_RADIUS_M,
     IDW_NEIGHBORS,
-    FAR_CUTOFF_DEG,
     REFERENCE_ANGLE_DEG,
 )
 
@@ -49,7 +48,7 @@ class WeightedAccumulator:
                  (row >= 0) & (row < self.nrows))
 
         r, c = row[valid], col[valid]
-        
+
         # Gaussian feathering centered at empirical inc_angle median (55°).
         # σ=12° ensures edge samples (20°, 70°) receive near-zero weight,
         # enabling genuine smooth blending in overlap regions.
@@ -85,7 +84,7 @@ class WeightedAccumulator:
     def result(self):
         # Require minimum cumulative weight: avoids cells backed only by
         # swath-edge samples with very low gaussian weights.
-        mask = self.sum_weight > 0.3
+        mask = self.sum_weight > MOSAIC_WEIGHT_FLOOR
         out_db = np.full((self.nrows, self.ncols), -9999.0, dtype=np.float32)
         out_db[mask] = self.sum_db[mask] / self.sum_weight[mask]
         return out_db, self.label_best

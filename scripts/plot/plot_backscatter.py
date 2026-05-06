@@ -2,11 +2,12 @@
 Render SSS mosaic GeoTIFFs as publication-quality figures.
 
 Reads bs_tif and lbl_tif produced by build_sss_backscatter.py,
-outputs two PNGs (backscatter + cluster label map).
+outputs two PNGs (backscatter + cluster label map) per frequency.
 
 Usage:
-    python scripts/plot/plot_backscatter.py --config configs/mudan.yaml
-    python scripts/plot/plot_backscatter.py --config configs/mudan.yaml --mode global_arc
+    python scripts/plot/plot_backscatter.py             # default: both HF and LF
+    python scripts/plot/plot_backscatter.py --freq hf
+    python scripts/plot/plot_backscatter.py --freq lf
 """
 import argparse
 
@@ -83,7 +84,6 @@ def _render(data, bounds, tr_to_wgs84, out_path, title, plot_type, n_clusters=No
     cax = div.append_axes("right", size="4%", pad=0.05)
     plt.colorbar(im, cax=cax, label=cbar_label, ticks=cbar_ticks)
 
-    # ax.set_title(title, fontsize=14, fontweight="bold")
     _setup_latlon_axes(ax, bounds, tr_to_wgs84)
     plt.tight_layout()
 
@@ -93,58 +93,40 @@ def _render(data, bounds, tr_to_wgs84, out_path, title, plot_type, n_clusters=No
     print(f"  saved: {out_path.relative_to(ROOT)}")
 
 
-def _resolve_paths(mode):
-    """Resolve tif / output png paths for the given mode."""
-    cfg = get_config()
-    sss_cfg = cfg["sss"]
-
-    bs_tif  = ROOT / sss_cfg["outputs"]["bs_tif"]
-    lbl_tif = ROOT / sss_cfg["outputs"]["lbl_tif"]
-    if mode != "full":
-        bs_tif  = bs_tif.with_stem(bs_tif.stem + f"_{mode}")
-        lbl_tif = lbl_tif.with_stem(lbl_tif.stem + f"_{mode}")
+def _resolve_paths(sss_cfg, freq):
+    """Resolve tif / output png paths for the given frequency."""
+    output_dir = ROOT / sss_cfg["output_dir"]
+    f = freq.lower()
+    bs_tif = output_dir / f"sss_backscatter_{f}.tif"
+    lbl_tif = output_dir / f"sss_clusters_{f}.tif"
 
     fig_dir = ROOT / "outputs/figures"
-    bs_png  = fig_dir / f"{bs_tif.stem}.png"
+    bs_png = fig_dir / f"{bs_tif.stem}.png"
     lbl_png = fig_dir / f"{lbl_tif.stem}.png"
-
-    # Derive frequency label (hf/lf) from filename for title text
-    freq = "HF" if "hf" in bs_tif.stem.lower() else "LF"
-    return bs_tif, lbl_tif, bs_png, lbl_png, freq
+    return bs_tif, lbl_tif, bs_png, lbl_png
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=False)
-    parser.add_argument("--mode", default="full",
-                        choices=["full", "global_arc", "raw"])
-    args = parser.parse_args()
-
-    bs_tif, lbl_tif, bs_png, lbl_png, freq = _resolve_paths(args.mode)
+def _plot_one(sss_cfg, freq):
+    """Render figures for one frequency."""
+    bs_tif, lbl_tif, bs_png, lbl_png = _resolve_paths(sss_cfg, freq)
 
     if not bs_tif.exists():
-        raise FileNotFoundError(
-            f"{bs_tif} not found. Run build_sss_backscatter.py --mode {args.mode} first."
-        )
+        print(f"  skip {freq}: {bs_tif.name} not found. "
+              f"Run build_sss_backscatter.py first.")
+        return
 
     _, _, crs = _load_tif(bs_tif, nodata=-9999.0)
     tr_to_wgs84 = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
 
-    # Mode suffix for titles
-    mode_suffix = {"full": "", "global_arc": " (Global ARC)", "raw": " (Raw)"}[args.mode]
-
-    # Backscatter
-    print("Rendering backscatter...")
+    print(f"\nRendering {freq}...")
     bs_data, bounds, _ = _load_tif(bs_tif, nodata=-9999.0)
     _render(
         bs_data, bounds, tr_to_wgs84, bs_png,
-        title=f"Calibrated SSS Backscatter ({freq}){mode_suffix}",
+        title=f"Calibrated SSS Backscatter ({freq})",
         plot_type="bs",
     )
 
-    # Clusters — only meaningful for full mode
-    if args.mode == "full" and lbl_tif.exists():
-        print("Rendering clusters...")
+    if lbl_tif.exists():
         lbl_data, _, _ = _load_tif(lbl_tif, nodata=255)
         valid = ~np.isnan(lbl_data)
         if valid.any():
@@ -155,6 +137,22 @@ def main():
                 plot_type="cluster",
                 n_clusters=n_clusters,
             )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=False)
+    parser.add_argument("--freq", default="all",
+                        choices=["all", "hf", "lf"])
+    args = parser.parse_args()
+
+    cfg = get_config()
+    sss_cfg = cfg["sss"]
+
+    if args.freq in ("all", "hf"):
+        _plot_one(sss_cfg, "HF")
+    if args.freq in ("all", "lf"):
+        _plot_one(sss_cfg, "LF")
 
 
 if __name__ == "__main__":

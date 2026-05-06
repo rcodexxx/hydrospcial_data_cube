@@ -2,31 +2,78 @@
 Zhao (2017) radiometric correction for SSS backscatter.
 
 Pipeline:
+  0. Gain normalization per (line, channel)        — Stage 2b
   1. Along-track TVG residual: bs *= h_0 / altitude
   2. Convert to dB
   3. Build angular waterfall (ping x angle_bin)
   4. Robust z-score per angle column (median + MAD)
-  5. Cluster (HDBSCAN default)
+  5. K-means clustering with iterative merge (Zhao §3.2.2)
   6. Mode filter on label image
   7. Per-cluster ABC: ABC(c, phi) = mean(bs_db | cluster=c, angle=phi)
   8. Apply Zhao Eq.8: bs_corrected = bs_raw - ABC(c, phi) + BS_0(c)
-  9. Cross-line L1 leveling (in level_swaths, called separately)
 """
 import numpy as np
 import pandas as pd
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import medfilt2d
+from sklearn.cluster import KMeans
 
 from src.sss.config import (
     REFERENCE_ANGLE_DEG,
-    NADIR_CUTOFF_DEG, FAR_CUTOFF_DEG,
+    NADIR_CUTOFF_DEG,
+    get_far_cutoff,
     ANGLE_MIN_DEG, ANGLE_MAX_DEG, ANGLE_BIN_WIDTH_DEG,
     MIN_SAMPLES_PER_ANGLE_BIN, MIN_SAMPLES_PER_CLUSTER_BIN,
     MODE_FILTER_WINDOW,
+    GAIN_NORM_PERCENTILE, GAIN_NORM_MIN_SAMPLES,
 )
 
 
-# Part A: Along-track TVG residual
+# ──────────────────────────────────────────────────────────────
+# Gain normalization (Stage 2b)
+# ──────────────────────────────────────────────────────────────
+def normalize_gain(pooled, ref_percentile=GAIN_NORM_PERCENTILE):
+    """
+    AGC compensation: normalize bs_linear per (line, channel) by
+    `ref_percentile`-th percentile.
+
+    EdgeTech's per-ping dynamic AGC produces up to 50x amplitude
+    differences across survey lines. This places all lines on a
+    comparable linear scale before Zhao's radiometric correction.
+
+    Returns a new pooled dict with normalized bs_linear.
+    """
+    pooled = {k: v.copy() if hasattr(v, "copy") else v
+              for k, v in pooled.items()}
+    bs_lin = pooled["bs_linear"]
+
+    refs = []
+    n_groups = 0
+    for line in np.unique(pooled["line_id"]):
+        for ch in (0, 1):
+            mask = (pooled["line_id"] == line) & (pooled["channel_id"] == ch)
+            if mask.sum() < GAIN_NORM_MIN_SAMPLES:
+                continue
+            ref = np.percentile(bs_lin[mask], ref_percentile)
+            if ref > 0:
+                bs_lin[mask] = bs_lin[mask] / ref
+                refs.append(float(ref))
+                n_groups += 1
+
+    print(f"  Normalized {n_groups} (line, channel) groups")
+    if refs:
+        refs = np.array(refs)
+        print(f"  Ref range: p5={np.percentile(refs, 5):.3f}, "
+              f"median={np.median(refs):.3f}, "
+              f"p95={np.percentile(refs, 95):.3f}")
+        print(f"  Max/min ratio: {refs.max() / refs.min():.1f}x")
+
+    return pooled
+
+
+# ──────────────────────────────────────────────────────────────
+# Along-track TVG residual (Zhao Eq.2)
+# ──────────────────────────────────────────────────────────────
 def altitude_correct(bs_linear, altitude, h0=None, clip_percentile=99.5,
                      ratio_min=0.5, ratio_max=2.0):
     """Zhao Eq.(2): bs *= h_0 / altitude. Clips extreme amplitudes."""
@@ -41,7 +88,9 @@ def altitude_correct(bs_linear, altitude, h0=None, clip_percentile=99.5,
     return corrected.astype(np.float32), h0
 
 
-# Part B: Angular waterfall
+# ──────────────────────────────────────────────────────────────
+# Angular waterfall
+# ──────────────────────────────────────────────────────────────
 def build_angular_waterfall(bs_db, inc_angle, ping_idx):
     """Per-sample arrays -> 2D (n_pings x n_angle_bins) median grid."""
     bins = np.arange(ANGLE_MIN_DEG, ANGLE_MAX_DEG + ANGLE_BIN_WIDTH_DEG,
@@ -68,7 +117,9 @@ def build_angular_waterfall(bs_db, inc_angle, ping_idx):
     return waterfall, angle_centers, ping_ids
 
 
-# Part C: Robust z-score
+# ──────────────────────────────────────────────────────────────
+# Robust z-score
+# ──────────────────────────────────────────────────────────────
 def robust_zscore_per_angle(waterfall):
     """z = (x - median) / (1.4826 * MAD), per angle column."""
     z = np.full_like(waterfall, np.nan, dtype=np.float32)
@@ -85,12 +136,12 @@ def robust_zscore_per_angle(waterfall):
     return z
 
 
-# Part D: Clustering
+# ──────────────────────────────────────────────────────────────
+# K-means with iterative merge (Zhao §3.2.2)
+# ──────────────────────────────────────────────────────────────
 def _kmeans_with_merge(features, k_init, bs_range,
                        min_proportion=0.01, merge_distance_ratio=0.02):
-    """K-means++ with iterative merge (Zhao 2017, Section 3.2.2)."""
-    from sklearn.cluster import KMeans
-
+    """K-means++ with iterative merge for tight clusters."""
     k = k_init
     labels = None
     merge_threshold = merge_distance_ratio * bs_range
@@ -164,9 +215,8 @@ def run_clustering(zscore_waterfall, cluster_cfg):
     return labels
 
 
-# Part E: Label post-processing
 def smooth_labels(labels):
-    """Mode filter on 2D label image."""
+    """2D mode filter on label image to suppress single-pixel speckle."""
     if MODE_FILTER_WINDOW <= 1:
         return labels
     smoothed = medfilt2d(labels.astype(np.int16), kernel_size=MODE_FILTER_WINDOW)
@@ -174,25 +224,9 @@ def smooth_labels(labels):
     return smoothed
 
 
-# Part F: ABC
-def compute_global_abc(waterfall):
-    """Single global ABC across all pixels."""
-    n_bins = waterfall.shape[1]
-    abc = np.full(n_bins, np.nan, dtype=np.float32)
-    for j in range(n_bins):
-        col = waterfall[:, j]
-        valid = np.isfinite(col)
-        if valid.sum() >= MIN_SAMPLES_PER_ANGLE_BIN:
-            abc[j] = np.median(col[valid])
-
-    valid_bins = np.isfinite(abc)
-    if valid_bins.sum() > 3:
-        abc[valid_bins] = uniform_filter1d(abc[valid_bins], size=5)
-
-    bs_0 = float(np.nanmean(abc))
-    return abc, bs_0
-
-
+# ──────────────────────────────────────────────────────────────
+# ABC curves
+# ──────────────────────────────────────────────────────────────
 def compute_per_cluster_abc(waterfall, labels):
     """Per-cluster ABC: ABC(c, phi) = mean(bs_db | cluster=c, angle=phi)."""
     cluster_ids = np.unique(labels)
@@ -218,15 +252,6 @@ def compute_per_cluster_abc(waterfall, labels):
     return abc_by_cluster
 
 
-def apply_global_abc(bs_db, inc_angle, abc, bs_0, angle_centers):
-    """Apply single global ABC."""
-    valid = np.isfinite(abc)
-    if valid.sum() < 2:
-        return bs_db.copy()
-    correction = np.interp(inc_angle, angle_centers[valid], abc[valid])
-    return (bs_db - correction + bs_0).astype(np.float32)
-
-
 def apply_per_cluster_abc(bs_db, inc_angle, ping_idx, sample_labels,
                           abc_by_cluster, angle_centers):
     """Apply Zhao Eq.8 per sample using its cluster's ABC."""
@@ -243,26 +268,41 @@ def apply_per_cluster_abc(bs_db, inc_angle, ping_idx, sample_labels,
     return bs_corr.astype(np.float32)
 
 
-# Part G: Orchestration
+# ──────────────────────────────────────────────────────────────
+# Orchestration
+# ──────────────────────────────────────────────────────────────
 def to_db(bs_linear):
-    return 10.0 * np.log10(np.maximum(bs_linear, 1e-12)).astype(np.float32)
+    """
+    Convert linear backscatter to dB.
+
+    Samples with bs_linear ≤ 1e-12 (typically dropped/saturated raw
+    samples that EdgeTech firmware writes as 0) become NaN so they
+    skip mosaic accumulation entirely. Without this, np.maximum
+    floors them to -120 dB and pollutes cell averages.
+    """
+    result = np.full_like(bs_linear, np.nan, dtype=np.float32)
+    valid = bs_linear > 1e-12
+    result[valid] = 10.0 * np.log10(bs_linear[valid])
+    return result
 
 
-def mask_out_of_range_angles(bs_db, inc_angle):
-    """Set samples outside [NADIR_CUTOFF, FAR_CUTOFF] to NaN."""
-    bad = (inc_angle < NADIR_CUTOFF_DEG) | (inc_angle > FAR_CUTOFF_DEG)
+def mask_out_of_range_angles(bs_db, inc_angle, freq):
+    """Set samples outside [NADIR_CUTOFF, FAR_CUTOFF(freq)] to NaN."""
+    far_cutoff = get_far_cutoff(freq)
+    bad = (inc_angle < NADIR_CUTOFF_DEG) | (inc_angle > far_cutoff)
     bs_db = bs_db.copy()
     bs_db[bad] = np.nan
     return bs_db
 
 
-def run_correction(pooled, cluster_cfg, mode="full"):
+def run_correction(pooled, cluster_cfg, freq):
     """
-    Full correction pipeline on pooled samples.
+    Full Zhao correction on pooled samples.
 
     pooled: dict with bs_linear, altitude, inc_angle, ping_idx,
             line_id, channel_id (all 1D, equal length).
-    mode: "raw" | "global_arc" | "full"
+    freq:   'HF' or 'LF' — selects channel-aware angle cutoff.
+
     Returns: dict with bs_db, sample_labels, diagnostics.
     """
     bs_lin = pooled["bs_linear"].copy()
@@ -271,18 +311,11 @@ def run_correction(pooled, cluster_cfg, mode="full"):
     pid = pooled["ping_idx"]
     diag = {}
 
-    if mode == "raw":
-        bs_db = to_db(bs_lin)
-        bs_db = mask_out_of_range_angles(bs_db, inc)
-        sample_labels = np.full(len(bs_db), -1, dtype=np.int16)
-        return {"bs_db": bs_db, "sample_labels": sample_labels,
-                "diagnostics": diag}
-
     # Step 1: along-track TVG residual
     bs_lin, h0 = altitude_correct(bs_lin, alt)
     diag["h0"] = h0
-    ratio = h0 / pooled["altitude"]
-    print(f"correction ratio: min={ratio.min():.2f}, "
+    ratio = h0 / alt
+    print(f"  correction ratio: min={ratio.min():.2f}, "
           f"median={np.median(ratio):.2f}, max={ratio.max():.2f}")
 
     # Step 2: dB
@@ -293,16 +326,6 @@ def run_correction(pooled, cluster_cfg, mode="full"):
     diag["waterfall_shape"] = waterfall.shape
     diag["angle_centers"] = angle_centers
     diag["waterfall"] = waterfall
-
-    if mode == "global_arc":
-        abc, bs_0 = compute_global_abc(waterfall)
-        bs_corrected = apply_global_abc(bs_db, inc, abc, bs_0, angle_centers)
-        bs_corrected = mask_out_of_range_angles(bs_corrected, inc)
-        diag["global_abc"] = abc
-        diag["global_bs_0"] = bs_0
-        sample_labels = np.full(len(bs_db), -1, dtype=np.int16)
-        return {"bs_db": bs_corrected, "sample_labels": sample_labels,
-                "diagnostics": diag}
 
     # Step 4-5: z-score + cluster
     zscore = robust_zscore_per_angle(waterfall)
@@ -337,7 +360,7 @@ def run_correction(pooled, cluster_cfg, mode="full"):
     bs_corrected = apply_per_cluster_abc(
         bs_db, inc, pid, sample_labels, abc_by_cluster, angle_centers)
 
-    bs_corrected = mask_out_of_range_angles(bs_corrected, inc)
+    bs_corrected = mask_out_of_range_angles(bs_corrected, inc, freq)
 
     return {"bs_db": bs_corrected, "sample_labels": sample_labels,
             "diagnostics": diag}

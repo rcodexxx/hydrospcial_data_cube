@@ -4,8 +4,10 @@ Per-channel SSS georeferencing.
 For one .jsf channel:
   - Filter out pings during turns / high roll / rapid heading change
   - Determine towfish altitude (first-return preferred, MBES fallback)
-  - Apply median-filter altitude outlier rejection
-  - Project each along-track sample to ground coordinates
+  - Smooth altitude with a 1D Kalman filter (Woock 2011) using
+    Mahalanobis gating to reject spurious first-return spikes
+  - Project each along-track sample to ground coordinates with a
+    channel-aware angle cutoff
   - Compute incidence angle per sample
 
 Returns a dict of 1D arrays (one entry per valid sample).
@@ -14,19 +16,20 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from filterpy.kalman import KalmanFilter
 from pyproj import Transformer
 from rasterio.transform import rowcol
 from scipy.signal import medfilt
 
-from src.config import get_config
 from src.sss.config import (
     TURN_HEADING_THRESHOLD_DEG,
     ROLL_THRESHOLD_DEG,
     HEADING_RATE_THRESHOLD_DEG_S,
-    ALTITUDE_MEDIAN_FILTER_WINDOW,
-    ALTITUDE_OUTLIER_RATIO,
+    NADIR_CUTOFF_DEG,
     get_far_cutoff,
-    NADIR_CUTOFF_DEG
+    KALMAN_PROCESS_VAR,
+    KALMAN_MEASUREMENT_VAR,
+    KALMAN_OUTLIER_SIGMA,
 )
 from src.sss.read_sss_jsf import read_sss_jsf
 
@@ -37,8 +40,8 @@ _EARTH_RADIUS_M = 6_371_000.0
 # First-return detection
 # ──────────────────────────────────────────────────────────────
 def detect_first_return(amps, pix_m, min_range_m=3.0, max_range_m=None,
-                       threshold_ratio=0.1):
-    """Threshold-based first-return detection (original version)."""
+                        threshold_ratio=0.1):
+    """Threshold-based first-return detection."""
     min_idx = int(min_range_m / pix_m)
     if max_range_m is not None:
         max_idx = min(int(max_range_m / pix_m), len(amps))
@@ -46,7 +49,7 @@ def detect_first_return(amps, pix_m, min_range_m=3.0, max_range_m=None,
         max_idx = len(amps)
     if min_idx >= max_idx:
         return None
-    
+
     search = medfilt(amps[min_idx:max_idx].astype(np.float64), kernel_size=21)
     max_val = search.max()
     if max_val <= 0:
@@ -141,59 +144,74 @@ def _turn_filter_mask(cd):
 # ──────────────────────────────────────────────────────────────
 def _compute_altitudes(idx, cd, mbes_zs, max_altitude, min_altitude=5.0):
     """
-    Fbr-primary altitude. MBES used only as sanity check and fallback.
-    
-    Rationale: mbes_depth - towfish_depth has accumulated error from
-    towfish position estimation, MBES grid interpolation, and depth
-    sensor calibration. Direct acoustic first-return is more reliable.
+    First-return primary altitude. MBES used only as fallback.
+
+    fbr-primary chosen because mbes_depth - towfish_depth has
+    accumulated error from towfish position estimation, MBES grid
+    interpolation, and depth sensor calibration. Direct acoustic
+    first-return is more reliable.
     """
     altitudes = np.full(len(idx), np.nan, dtype=np.float32)
-    
+
     for j, i in enumerate(idx):
         amps = cd["amps"][i].astype(np.float32)
         pix_m = float(cd["pix_m"][i])
         fbr = detect_first_return(amps, pix_m, max_range_m=max_altitude)
-        
+
         depth_m = float(cd["depth_m"][i])
         mbes_z = float(mbes_zs[j]) if np.isfinite(mbes_zs[j]) else np.nan
         mbes_alt = (mbes_z - depth_m) if (np.isfinite(mbes_z) and depth_m > 0) else np.nan
-        
-        # fbr-primary: accept fbr if in valid range
+
         if fbr is not None and min_altitude < fbr < max_altitude:
             altitudes[j] = fbr
             continue
-        
-        # fbr failed: last resort is MBES-derived
+
         if np.isfinite(mbes_alt) and min_altitude < mbes_alt < max_altitude:
             altitudes[j] = mbes_alt
-        # else: NaN, ping dropped
-    
+
     return altitudes
 
 
-def _filter_altitude_outliers(altitudes):
+def _kalman_smooth_altitudes(altitudes):
     """
-    Reject along-track bottom-tracking glitches using median filter.
-    Replace outliers (|alt - local_median| / local_median > threshold) with NaN.
+    Kalman smoothing on per-ping altitude with Mahalanobis gating
+    (Woock 2011). 1D random-walk state model with σ-gate observation
+    rejection. Pings whose observation is rejected emit NaN so
+    downstream Pass 3 skips them (matches legacy behaviour).
     """
-    altitudes = altitudes.copy()
-    valid = np.isfinite(altitudes)
-    if valid.sum() < ALTITUDE_MEDIAN_FILTER_WINDOW:
-        return altitudes
+    n = len(altitudes)
+    valid_mask = np.isfinite(altitudes)
+    if valid_mask.sum() < 5:
+        return altitudes  # too few obs to filter
 
-    local_med = medfilt(
-        np.where(valid, altitudes, np.median(altitudes[valid])),
-        kernel_size=ALTITUDE_MEDIAN_FILTER_WINDOW,
-    )
-    ratio = np.abs(altitudes - local_med) / np.maximum(local_med, 1e-6)
-    altitudes[ratio > ALTITUDE_OUTLIER_RATIO] = np.nan
-    return altitudes
+    kf = KalmanFilter(dim_x=1, dim_z=1)
+    kf.x = np.array([[float(np.nanmedian(altitudes))]])
+    kf.P = np.array([[10.0]])
+    kf.F = np.array([[1.0]])
+    kf.H = np.array([[1.0]])
+    kf.Q = np.array([[KALMAN_PROCESS_VAR]])
+    kf.R = np.array([[KALMAN_MEASUREMENT_VAR]])
+
+    smoothed = np.full(n, np.nan, dtype=np.float32)
+    for i in range(n):
+        kf.predict()
+        if not valid_mask[i]:
+            continue
+        obs = altitudes[i]
+        innov = obs - kf.x[0, 0]
+        innov_std = np.sqrt(kf.P[0, 0] + KALMAN_MEASUREMENT_VAR)
+        if abs(innov) / max(innov_std, 1e-6) < KALMAN_OUTLIER_SIGMA:
+            kf.update(np.array([[obs]]))
+            smoothed[i] = float(kf.x[0, 0])
+
+    return smoothed
 
 
 # ──────────────────────────────────────────────────────────────
 # Main entry
 # ──────────────────────────────────────────────────────────────
-def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=None):
+def georef_line(jsf_path, mbes_tif, channel, cable_length=None,
+                mbes_preloaded=None):
     """
     Georeference one channel of one .jsf file.
 
@@ -221,6 +239,7 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
                 "EPSG:4326", f"EPSG:{src.crs.to_epsg()}", always_xy=True)
 
     side = -90.0 if "port" in channel else 90.0
+    far_cutoff = get_far_cutoff(channel)
 
     # ── Pass 1: filter pings ──────────────────────────────
     keep = _turn_filter_mask(cd)
@@ -236,7 +255,7 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
 
     # Layback correction
     if cable_length is not None:
-        laybacks = np.sqrt(np.maximum(cable_length**2 - depths**2, 0.0))
+        laybacks = np.sqrt(np.maximum(cable_length ** 2 - depths ** 2, 0.0))
         lats, lons = _offset_latlon(lats, lons, headings + 180.0, laybacks)
 
     # MBES depth query
@@ -246,10 +265,10 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
         mbes_zs[valid_pos] = _query_mbes_batch(
             lats[valid_pos], lons[valid_pos], mbes_data, tf, tr)
 
-    # ── Pass 2: altitude + outlier rejection ──────────────
+    # ── Pass 2: altitude + Kalman smoothing ───────────────
     max_altitude = float(np.nanmax(mbes_data)) * 1.15
     altitudes = _compute_altitudes(idx, cd, mbes_zs, max_altitude)
-    altitudes = _filter_altitude_outliers(altitudes)
+    altitudes = _kalman_smooth_altitudes(altitudes)
 
     # ── Pass 3: per-ping flat-bottom projection ───────────
     out = {k: [] for k in (
@@ -268,7 +287,6 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
         amps = cd["amps"][i].astype(np.float32)
 
         slant = np.arange(len(amps), dtype=np.float32) * pix_m
-        far_cutoff = get_far_cutoff(channel)
         min_slant = altitude / np.cos(np.deg2rad(NADIR_CUTOFF_DEG))
         max_slant = altitude / np.cos(np.deg2rad(far_cutoff))
         mask = (slant > min_slant) & (slant < max_slant)
@@ -276,7 +294,7 @@ def georef_line(jsf_path, mbes_tif, channel, cable_length=None, mbes_preloaded=N
             continue
 
         sv = slant[mask]
-        gv = np.sqrt(np.maximum(sv**2 - altitude**2, 0.0)).astype(np.float32)
+        gv = np.sqrt(np.maximum(sv ** 2 - altitude ** 2, 0.0)).astype(np.float32)
         inc_v = np.rad2deg(np.arccos(
             np.clip(altitude / sv, -1.0, 1.0))).astype(np.float32)
 

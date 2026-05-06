@@ -1,13 +1,12 @@
 """
 SSS sample-level pipeline.
 
-Provides the orchestration from .jsf collection through Zhao
-correction, returning sample-level arrays ready for downstream use
-(mosaicking, target validation, etc.).
+Orchestrates .jsf collection through Zhao correction, returning
+sample-level arrays ready for downstream use (mosaicking, MAG-target
+overlays, future analysis scripts).
 
-This module separates pipeline logic from CLI scripts so multiple
-callers (build_sss_backscatter, validate_mag_targets, future analysis
-scripts) can reuse the same processing without duplicating code.
+Separates pipeline logic from CLI scripts so multiple callers can
+reuse the same processing without duplicating code.
 """
 import numpy as np
 import rasterio
@@ -15,7 +14,8 @@ from pyproj import Transformer
 from tqdm import tqdm
 
 from src.config import get_config, ROOT
-from src.sss.correction import run_correction
+from src.sss.config import channels_for_freq
+from src.sss.correction import normalize_gain, run_correction
 from src.sss.georef import georef_line
 
 
@@ -64,9 +64,9 @@ def georef_all(jsf_files, channels, mbes, mbes_tif):
 
 def pool_georef_results(results):
     """
-    Concatenate per-channel georef dicts into a single flat sample pool.
-    Adds line_id and channel_id arrays. Reassigns global ping_idx so
-    pings from different lines don't collide.
+    Concatenate per-channel georef dicts into a single flat sample
+    pool. Adds line_id and channel_id arrays. Reassigns global
+    ping_idx so pings from different lines don't collide.
     """
     arrays = {k: [] for k in (
         "lat", "lon", "bs_linear", "altitude",
@@ -90,64 +90,26 @@ def pool_georef_results(results):
     return pooled
 
 
-def normalize_gain(pooled, ref_percentile=40):
+def run_pipeline(freq):
     """
-    AGC compensation: normalize bs_linear per (line, channel) by
-    `ref_percentile`-th percentile.
+    End-to-end SSS pipeline for one frequency.
 
-    Returns a new pooled dict with normalized bs_linear; original is
-    not modified.
+    Encapsulates: collect → load_mbes → georef → pool → normalize →
+                  Zhao correction → projected coordinates.
 
-    EdgeTech's per-ping dynamic AGC produces up to 50x amplitude
-    differences across survey lines. This places all lines on a
-    comparable linear scale before Zhao's radiometric correction.
-    """
-    pooled = {k: v.copy() if hasattr(v, "copy") else v
-              for k, v in pooled.items()}
-    bs_lin = pooled["bs_linear"]
-
-    refs = []
-    n_groups = 0
-    for line in np.unique(pooled["line_id"]):
-        for ch in (0, 1):
-            mask = (pooled["line_id"] == line) & (pooled["channel_id"] == ch)
-            if mask.sum() < 100:
-                continue
-            ref = np.percentile(bs_lin[mask], ref_percentile)
-            if ref > 0:
-                bs_lin[mask] = bs_lin[mask] / ref
-                refs.append(float(ref))
-                n_groups += 1
-
-    print(f"  Normalized {n_groups} (line, channel) groups")
-    if refs:
-        refs = np.array(refs)
-        print(f"  Ref range: p5={np.percentile(refs, 5):.3f}, "
-              f"median={np.median(refs):.3f}, "
-              f"p95={np.percentile(refs, 95):.3f}")
-        print(f"  Max/min ratio: {refs.max() / refs.min():.1f}x")
-
-    return pooled
-
-
-def prepare_sss_samples(channels, mode="full"):
-    """
-    High-level convenience: from yaml + channels list, return
-    correction-ready sample-level data.
-
-    Encapsulates: collect → load_mbes → georef_all → pool →
-                  normalize_gain → run_correction.
-
-    Returns a dict with bs_db (corrected, sample-level), sample_labels
-    (cluster id per sample), and projected x_m/y_m alongside the
-    original pooled fields. None if no valid samples.
+    freq: 'HF' or 'LF'
+    Returns dict with:
+      - all pooled fields (lat, lon, bs_linear, altitude, ...)
+      - x_m, y_m: projected coords in grid CRS
+      - bs_db, sample_labels, diagnostics: from Zhao correction
+    Returns None if no valid samples.
     """
     cfg = get_config()
     sss_cfg = cfg["sss"]
     mbes_tif = ROOT / cfg["mbes"]["bathymetry_tif"]
 
-    print(f"  Channels: {channels}")
-    print(f"  Mode: {mode}")
+    channels = channels_for_freq(freq)
+    print(f"  Frequency: {freq}  Channels: {channels}")
 
     jsf_files = collect_jsf_files(sss_cfg)
     print(f"  Found {len(jsf_files)} .jsf files")
@@ -158,12 +120,29 @@ def prepare_sss_samples(channels, mode="full"):
         return None
 
     pooled = pool_georef_results(results)
-    print(f"  Pooled {len(pooled['bs_linear']):,} samples")
+    n = len(pooled["bs_linear"])
+    print(f"  Pooled {n:,} samples")
+    print(f"  altitude:  min={pooled['altitude'].min():.2f}  "
+          f"p5={np.percentile(pooled['altitude'], 5):.2f}  "
+          f"median={np.median(pooled['altitude']):.2f}  "
+          f"p95={np.percentile(pooled['altitude'], 95):.2f}  "
+          f"max={pooled['altitude'].max():.2f}")
+    print(f"  inc_angle: " + "  ".join(
+        f"p{q}={np.percentile(pooled['inc_angle'], q):.1f}°"
+        for q in (1, 5, 50, 95, 99)
+    ))
 
+    print("\n  Gain normalization per (line, channel)...")
     pooled = normalize_gain(pooled)
-    correction = run_correction(pooled, sss_cfg["cluster"], mode=mode)
 
-    # Project lat/lon to grid CRS
+    print(f"\n  Running Zhao correction...")
+    correction = run_correction(pooled, sss_cfg["cluster"], freq=freq)
+    diag = correction["diagnostics"]
+    print(f"  h0:          {diag.get('h0', float('nan')):.2f} m")
+    print(f"  n_clusters:  {diag.get('n_clusters', 0)}")
+    print(f"  noise ratio: {diag.get('noise_ratio', 0):.2%}")
+
+    # Project to grid CRS
     epsg = cfg["grid"]["epsg"]
     tr = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
     x_m, y_m = tr.transform(pooled["lon"], pooled["lat"])

@@ -19,19 +19,14 @@ mbes:
   bpi_tif: outputs/tif/mbes_bpi.tif   
 
 sss:
-  channels: [HF_port, HF_stbd]    # swap to [LF_port, LF_stbd] for LF
-
+  output_dir: outputs/tif
+ 
   survey_dirs:
     - path: data/sss/20251223
       cable_length: 15.0
     - path: data/sss/20251224
       cable_length: null
-
-  outputs:
-    bs_tif: outputs/tif/sss_backscatter_Hf.tif
-    lbl_tif: outputs/tif/sss_clusters_Hf.tif
-    validation_dir: outputs/sss_validation
-
+ 
   cluster:
     method: kmeans
     k_init: 7
