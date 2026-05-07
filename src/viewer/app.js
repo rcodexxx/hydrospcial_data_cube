@@ -29,7 +29,7 @@ let waterfallIndex = null, currentWfPings = 0, mapTrackMarker = null, currentTra
 const INITIAL_CENTER = [22.137, 120.785], INITIAL_ZOOM = 15;
 
 // ── 1. 初始化 Leaflet 地圖 ──────────────────────────────────
-const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 22, minZoom: 14, renderer: L.canvas({ tolerance: 15 }), zoomControl: false });
+const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 20, minZoom: 15, renderer: L.canvas({ tolerance: 15 }), zoomControl: false });
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 L.control.scale({ position: 'bottomright', metric: true, imperial: false }).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri', maxZoom: 18, maxNativeZoom: 18 }).addTo(map);
@@ -77,7 +77,7 @@ fetch(API + '/api/layers').then(r => r.json()).then(data => {
         map.fitBounds(L.latLngBounds(data.bounds).pad(0.05)); 
     }
     for (const [key, cfg] of Object.entries(data.layers)) { 
-        tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 22, maxNativeZoom: 22 }); 
+        tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 20, maxNativeZoom: 18 }); 
     }
     if (tileLayers['bathymetry']) { 
         tileLayers['bathymetry'].addTo(map); 
@@ -255,6 +255,18 @@ document.querySelectorAll('.layer-btn').forEach(btn => {
         const targetCheckIcon = targetBtn.querySelector('.check-icon');
         if (targetCheckIcon) targetCheckIcon.classList.remove('hidden');
 
+        // SSS Imagery group: show/hide HF/LF sub-control
+        const subControl = document.getElementById('imagery-subcontrol');
+        if (subControl) {
+            if (targetBtn.dataset.layerGroup === 'imagery') {
+                subControl.classList.remove('hidden');
+                subControl.classList.add('flex');
+            } else {
+                subControl.classList.add('hidden');
+                subControl.classList.remove('flex');
+            }
+        }
+
         // 載入底圖
         if (!tileLayers[layerId]) return;
         if (currentOverlay) map.removeLayer(currentOverlay);
@@ -291,6 +303,43 @@ document.querySelectorAll('.layer-btn').forEach(btn => {
             if (sedLegendAdded) { sedLegend.remove(); sedLegendAdded = false; }
         }
     });
+});
+
+// SSS Imagery sub-control: HF/LF radio
+document.querySelectorAll('.imagery-freq-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const freq = e.currentTarget.dataset.freq;
+        const newLayerId = freq === 'hf' ? 'imagery_hf' : 'imagery_lf';
+
+        // Update sub-button styles
+        document.querySelectorAll('.imagery-freq-btn').forEach(b => {
+            if (b.dataset.freq === freq) {
+                b.classList.add('bg-blue-600', 'text-white');
+                b.classList.remove('bg-slate-200', 'text-slate-700');
+            } else {
+                b.classList.remove('bg-blue-600', 'text-white');
+                b.classList.add('bg-slate-200', 'text-slate-700');
+            }
+        });
+
+        // Switch tile layer
+        if (currentOverlay) map.removeLayer(currentOverlay);
+        if (tileLayers[newLayerId]) {
+            tileLayers[newLayerId].setOpacity(document.getElementById('opacity-slider').value / 100);
+            tileLayers[newLayerId].addTo(map);
+            currentOverlay = tileLayers[newLayerId];
+            currentBaseLayerId = newLayerId;
+        }
+    });
+});
+
+// On page load: if SSS Imagery is the active layer, show sub-control by default
+document.addEventListener('DOMContentLoaded', () => {
+    const activeImagery = document.querySelector('.layer-btn[data-layer-group="imagery"].active');
+    if (activeImagery) {
+        document.getElementById('imagery-subcontrol')?.classList.remove('hidden');
+        document.getElementById('imagery-subcontrol')?.classList.add('flex');
+    }
 });
 
 document.getElementById('opacity-slider')?.addEventListener('input', (e) => { 
@@ -495,7 +544,10 @@ function openPanels(mode) {
     applyLayout();
 }
 
-fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => { waterfallIndex = data; });
+fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => { 
+    waterfallIndex = data;
+    window.waterfallIndex = data;
+});
 
 function showWaterfallSidebar(feature) {
     if (!waterfallIndex) return;
@@ -507,8 +559,13 @@ function showWaterfallSidebar(feature) {
         openPanels('sss');
         document.getElementById('rp-title').textContent = `SSS Viewer - ${filename || 'Unknown'}`;
         document.getElementById('rp-echarts-cursor')?.classList.remove('hidden');
-        if (waterfallIndex.sss[`${filename}_HF`]) document.getElementById('img-hf').src = `/waterfalls/${waterfallIndex.sss[`${filename}_HF`].image}`;
-        setSSSMode('hf'); 
+        // Sidebar shows LF preview (overview-friendly); HF detail is in modal
+        const lfEntry = waterfallIndex.sss[`${filename}_LF`];
+        if (lfEntry) document.getElementById('img-preview').src = `/waterfalls/${lfEntry.image}`;
+        // Wire up the "放大" button to open the modal
+        document.getElementById('rp-expand-btn').onclick = () => {
+            window.SSSModal?.open(filename);
+        };
         loadProfileData('rp', currentTrackCoords);
     } else if (props.instrument === 'SBP') {
         openPanels('sbp');
@@ -592,19 +649,6 @@ function handleSlider(e, panelPrefix) {
 }
 document.getElementById('bp-slider')?.addEventListener('input', (e) => handleSlider(e, 'bp'));
 document.getElementById('rp-slider')?.addEventListener('input', (e) => handleSlider(e, 'rp'));
-
-window.setSSSMode = function(mode) {
-    document.querySelectorAll('.sss-tab').forEach(b => { b.classList.remove('bg-white', 'shadow-sm', 'text-blue-600'); b.classList.add('text-slate-500'); });
-    document.getElementById(`tab-${mode}`)?.classList.add('bg-white', 'shadow-sm', 'text-blue-600');
-    document.getElementById(`tab-${mode}`)?.classList.remove('text-slate-500');
-
-    const hf = document.getElementById('sss-hf-container'), lf = document.getElementById('sss-lf-container'), imagesDiv = document.getElementById('rp-images');
-    if (mode === 'hf') { if(hf) hf.style.display = 'block'; if(lf) lf.style.display = 'none'; imagesDiv?.classList.add('flex-col'); imagesDiv?.classList.remove('flex-row'); currentRightWidth = 450; } 
-    else if (mode === 'lf') { if(hf) hf.style.display = 'none'; if(lf) lf.style.display = 'block'; imagesDiv?.classList.add('flex-col'); imagesDiv?.classList.remove('flex-row'); currentRightWidth = 450; } 
-    else { if(hf) hf.style.display = 'block'; if(lf) lf.style.display = 'block'; imagesDiv?.classList.remove('flex-col'); imagesDiv?.classList.add('flex-row'); currentRightWidth = 800; }
-    applyLayout();
-    setTimeout(() => document.getElementById('rp-slider')?.dispatchEvent(new Event('input')), 350);
-}
 
 // ── 8. ECharts 繪製引擎 ────────────────────────────────────
 function renderProfileChart(containerId, depth, isopach, sediment) {
@@ -774,6 +818,54 @@ function selectTrackline(feature, layer, parentLayer) {
 
 document.getElementById('chk-trackline-sss')?.addEventListener('change', (e) => { if (e.target.checked && sssLayer) sssLayer.addTo(map); else if (sssLayer) map.removeLayer(sssLayer); });
 document.getElementById('chk-trackline-sbp')?.addEventListener('change', (e) => { if (e.target.checked && sbpLayer) sbpLayer.addTo(map); else if (sbpLayer) map.removeLayer(sbpLayer); });
+
+
+// ── MAG candidates layer ──
+// Insert this block in app.js right after the existing
+// fetch(API + '/api/tracklines')...then(...) block that creates
+// sssLayer and sbpLayer.
+
+let magTargetsLayer = null;
+
+fetch(API + '/api/mag-targets').then(r => r.json()).then(geojson => {
+    magTargetsLayer = L.geoJSON(geojson, {
+        pointToLayer: (feature, latlng) => {
+            const a = feature.properties.anomaly_nT;
+            const radius = Math.min(14, Math.max(5, Math.log10(Math.abs(a)) * 4));
+            const fill = a > 0 ? '#ef4444' : '#3b82f6';
+            return L.circleMarker(latlng, {
+                radius,
+                fillColor: fill,
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.85,
+            });
+        },
+        onEachFeature: (feature, layer) => {
+            const p = feature.properties;
+            const popupHtml = `
+                <div class="px-2 py-1 font-sans">
+                    <div class="font-bold text-orange-500 border-b border-slate-300 pb-1 mb-1 text-[11px] uppercase tracking-wider">
+                        🧲 MAG Candidate
+                    </div>
+                    <div class="text-xs space-y-0.5">
+                        <div><span class="text-slate-500">ID:</span> <span class="font-mono">${p.target_id}</span></div>
+                        <div><span class="text-slate-500">Anomaly:</span> <span class="font-mono">${p.anomaly_nT > 0 ? '+' : ''}${p.anomaly_nT} nT</span></div>
+                        <div><span class="text-slate-500">Polarity:</span> ${p.polarity}</div>
+                    </div>
+                </div>
+            `;
+            layer.bindPopup(popupHtml);
+        },
+    });
+});
+
+document.getElementById('chk-mag-targets')?.addEventListener('change', (e) => {
+    if (!magTargetsLayer) return;
+    if (e.target.checked) magTargetsLayer.addTo(map);
+    else map.removeLayer(magTargetsLayer);
+});
 
 // ── 10. 面板拖曳邏輯 ───────────────────────────────────────
 let resizeTarget = null; 

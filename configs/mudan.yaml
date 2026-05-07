@@ -83,6 +83,7 @@ viewer:
 
   tile_layers:
     - { id: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      label: "Bathymetry",          palette: turbo_r }
-    - { id: imagery_hf,     path: outputs/tif/sss_backscatter_hf.tif,   label: "SSS Backscatter",     palette: copper }
+    - { id: imagery_hf,     path: outputs/tif/sss_backscatter_hf.tif,   label: "SSS Backscatter (HF)", palette: copper }
+    - { id: imagery_lf,     path: outputs/tif/sss_backscatter_lf.tif,   label: "SSS Backscatter (LF)", palette: copper }
     - { id: sediment_class, path: outputs/tif/sbp_sediment_rgb.tif,     label: "Sediment Class",      palette: null }
     - { id: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          label: "Magnetic Anomaly",    palette: rdbu }

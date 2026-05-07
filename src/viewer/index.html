@@ -26,6 +26,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -134,25 +135,42 @@
               </svg>
             </button>
 
-            <button
-              class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
-              data-layer="imagery_hf"
-            >
-              <span>SSS Imagery</span>
-              <svg
-                class="check-icon w-4 h-4 text-blue-400 hidden"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div class="flex flex-col gap-1">
+              <button
+                class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
+                data-layer="imagery_hf"
+                data-layer-group="imagery"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="3"
-                  d="M5 13l4 4L19 7"
-                ></path>
-              </svg>
-            </button>
+                <span>SSS Imagery</span>
+                <svg
+                  class="check-icon w-4 h-4 text-blue-400 hidden"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="3"
+                    d="M5 13l4 4L19 7"
+                  ></path>
+                </svg>
+              </button>
+              <div id="imagery-subcontrol" class="hidden ml-3 flex gap-1">
+                <button
+                  class="imagery-freq-btn flex-1 px-2 py-1 text-xs rounded bg-slate-200 text-slate-700 font-medium hover:bg-slate-300 transition-all"
+                  data-freq="hf"
+                >
+                  HF
+                </button>
+                <button
+                  class="imagery-freq-btn flex-1 px-2 py-1 text-xs rounded bg-blue-600 text-white font-medium hover:bg-blue-700 transition-all"
+                  data-freq="lf"
+                >
+                  LF
+                </button>
+              </div>
+            </div>
 
             <button
               class="layer-btn flex items-center justify-between px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-all"
@@ -279,6 +297,25 @@
                 />
                 <div
                   class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pink-500"
+                ></div>
+              </div>
+            </label>
+
+            <label
+              class="flex items-center justify-between cursor-pointer group"
+            >
+              <span
+                class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors"
+                >MAG Candidates</span
+              >
+              <div class="relative inline-flex items-center">
+                <input
+                  type="checkbox"
+                  id="chk-mag-targets"
+                  class="sr-only peer"
+                />
+                <div
+                  class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"
                 ></div>
               </div>
             </label>
@@ -508,12 +545,21 @@
         <span id="rp-title" class="font-bold text-slate-800 text-sm"
           >SSS Viewer</span
         >
-        <button
-          onclick="closePanels()"
-          class="text-slate-400 hover:text-red-500 transition-colors text-2xl leading-none px-2"
-        >
-          &times;
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            id="rp-expand-btn"
+            class="text-slate-400 hover:text-blue-600 transition-colors px-2 py-1 rounded hover:bg-blue-50 text-xs font-medium"
+            title="放大檢視 (Open Detail Viewer)"
+          >
+            放大
+          </button>
+          <button
+            onclick="closePanels()"
+            class="text-slate-400 hover:text-red-500 transition-colors text-2xl leading-none px-2"
+          >
+            &times;
+          </button>
+        </div>
       </header>
       <div class="flex-1 flex flex-col overflow-hidden min-h-0">
         <div
@@ -547,21 +593,72 @@
         ></div>
         <div
           id="rp-images"
-          class="flex-1 p-4 overflow-y-auto bg-slate-100 flex gap-4"
+          class="flex-1 p-4 overflow-y-auto bg-slate-100"
         >
-          <div id="sss-hf-container" class="flex-1 relative hidden">
+          <div id="sss-preview-container" class="relative">
             <div
               class="relative rounded shadow-sm bg-black overflow-hidden border border-slate-300"
             >
-              <img id="img-hf" class="w-full h-auto block" src="" />
+              <img id="img-preview" class="w-full h-auto block" src="" />
               <div
                 class="wf-redline absolute left-0 right-0 h-[2px] bg-orange-500 top-0 pointer-events-none"
               ></div>
+            </div>
+            <div class="text-[10px] text-slate-500 mt-1 text-center">
+              LF preview · 點「放大」開啟 OSD 細節檢視
             </div>
           </div>
         </div>
       </div>
     </section>
+
+    <div
+      id="sss-modal"
+      class="hidden fixed inset-0 z-[9999] bg-black/85 items-center justify-center backdrop-blur-sm"
+    >
+      <div
+        class="relative w-[95vw] h-[92vh] bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col"
+      >
+        <header
+          class="h-12 bg-slate-800/95 flex justify-between items-center px-4 border-b border-slate-700 shrink-0"
+        >
+          <div class="flex items-center gap-3">
+            <h3 class="text-white font-bold tracking-wide text-sm">SSS Detail Viewer</h3>
+            <div class="flex items-center gap-1 ml-4">
+              <button
+                id="sss-modal-freq-hf"
+                class="px-3 py-1 text-xs rounded font-medium bg-slate-200 text-slate-700 hover:bg-slate-300 transition-all"
+              >
+                HF
+              </button>
+              <button
+                id="sss-modal-freq-lf"
+                class="px-3 py-1 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-all"
+              >
+                LF
+              </button>
+            </div>
+            <div class="flex items-center gap-1 ml-2">
+              <button id="sss-modal-zoom-in" class="text-slate-300 hover:text-white px-2 py-1 text-sm" title="放大">＋</button>
+              <button id="sss-modal-zoom-out" class="text-slate-300 hover:text-white px-2 py-1 text-sm" title="縮小">－</button>
+              <button id="sss-modal-home" class="text-slate-300 hover:text-white px-2 py-1 text-xs" title="還原">⌂</button>
+            </div>
+          </div>
+          <button
+            id="sss-modal-close"
+            class="text-slate-400 hover:text-white text-2xl font-bold p-2 transition-colors"
+            title="關閉 (Esc)"
+          >
+            &times;
+          </button>
+        </header>
+        <div id="sss-modal-viewer" class="flex-1 bg-black"></div>
+        <div
+          id="sss-modal-status"
+          class="h-8 bg-slate-800/95 text-slate-300 text-xs px-4 flex items-center border-t border-slate-700 font-mono shrink-0"
+        ></div>
+      </div>
+    </div>
 
     <dialog
       id="modal-3d"
@@ -665,5 +762,6 @@
     </dialog>
 
     <script src="/viewer/app.js"></script>
+    <script src="/viewer/sss_modal.js"></script>
   </body>
 </html>
