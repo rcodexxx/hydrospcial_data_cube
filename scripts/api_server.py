@@ -9,6 +9,7 @@ Loads layers and config from yaml. Serves:
   GET /api/profile            depth/sediment/rl along polyline
   GET /api/3d-scene           heightmap + SSS texture for 3D block view
   GET /api/tracklines         survey tracklines GeoJSON
+  GET /api/mag-targets        MAG candidate targets GeoJSON
   GET /api/waterfall-index    waterfall image index for SSS/SBP viewer
 """
 import json
@@ -37,6 +38,7 @@ NC_PATH = ROOT / viewer_cfg["netcdf"]
 TRACKLINES_PATH = ROOT / viewer_cfg["tracklines"]
 WATERFALLS_DIR = ROOT / viewer_cfg["waterfalls_dir"]
 VIEWER_DIR = ROOT / viewer_cfg["static_dir"]
+MAG_TARGETS_PATH = (ROOT / cfg["mag"]["outputs"]["targets_csv"]).with_suffix(".geojson")
 SSS_HF_TIF = next(
     (ROOT / l["path"] for l in viewer_cfg["tile_layers"] if l["id"] == "imagery_hf"),
     None,
@@ -116,7 +118,6 @@ async def lifespan(_app):
 
     yield
 
-    # Cleanup
     if state["ds"] is not None:
         state["ds"].close()
 
@@ -318,6 +319,13 @@ async def get_3d_scene(x0: float, y0: float, x1: float, y1: float):
 async def get_tracklines():
     if TRACKLINES_PATH.exists():
         return JSONResponse(json.loads(TRACKLINES_PATH.read_text()))
+    return {"type": "FeatureCollection", "features": []}
+
+
+@app.get("/api/mag-targets")
+async def get_mag_targets():
+    if MAG_TARGETS_PATH.exists():
+        return JSONResponse(json.loads(MAG_TARGETS_PATH.read_text()))
     return {"type": "FeatureCollection", "features": []}
 
 

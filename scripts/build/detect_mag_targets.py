@@ -3,13 +3,15 @@ Detect magnetic targets from anomaly grid.
 
 Identifies local |anomaly| extrema above threshold, clusters nearby
 extrema (within DEDUP_RADIUS_M) to avoid double-counting dipole pairs,
-and writes a CSV target list for downstream UI consumption.
+and writes both a CSV and a GeoJSON target list for downstream
+consumption (CSV for analysis, GeoJSON for the viewer's Leaflet layer).
 
-The CSV is intentionally minimal — coordinates, anomaly amplitude,
+The output is intentionally minimal — coordinates, anomaly amplitude,
 polarity. Visualization (markers, labels, classification) happens in
 the UI layer, not here.
 """
 import csv
+import json
 
 import numpy as np
 import rasterio
@@ -64,6 +66,7 @@ def main():
     epsg = cfg["grid"]["epsg"]
     an_tif = ROOT / cfg["mag"]["outputs"]["anomaly_tif"]
     out_csv = ROOT / cfg["mag"]["outputs"]["targets_csv"]
+    out_geojson = out_csv.with_suffix(".geojson")
 
     print(f"Loading anomaly grid: {an_tif.name}")
     with rasterio.open(an_tif) as src:
@@ -102,24 +105,63 @@ def main():
     xs, ys, vals = xs[order], ys[order], vals[order]
     lons, lats = lons[order], lats[order]
 
-    # Write CSV
+    # Build targets list once, write to both formats
+    targets = [
+        {
+            "target_id": f"T{i:03d}",
+            "x_m": float(x),
+            "y_m": float(y),
+            "lon": float(lon),
+            "lat": float(lat),
+            "anomaly_nT": float(v),
+            "polarity": "+" if v > 0 else "-",
+        }
+        for i, (x, y, lon, lat, v) in enumerate(
+            zip(xs, ys, lons, lats, vals), start=1
+        )
+    ]
+
+    # CSV (existing format, backward compatible)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["target_id", "x_m", "y_m", "lon", "lat",
                          "anomaly_nT", "polarity"])
-        for i, (x, y, lon, lat, v) in enumerate(
-            zip(xs, ys, lons, lats, vals), start=1
-        ):
+        for t in targets:
             writer.writerow([
-                f"T{i:03d}",
-                f"{x:.2f}", f"{y:.2f}",
-                f"{lon:.6f}", f"{lat:.6f}",
-                f"{v:+.1f}",
-                "+" if v > 0 else "-",
+                t["target_id"],
+                f"{t['x_m']:.2f}", f"{t['y_m']:.2f}",
+                f"{t['lon']:.6f}", f"{t['lat']:.6f}",
+                f"{t['anomaly_nT']:+.1f}",
+                t["polarity"],
             ])
 
+    # GeoJSON for viewer (Leaflet GeoJSON layer)
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [t["lon"], t["lat"]],
+                },
+                "properties": {
+                    "target_id": t["target_id"],
+                    "anomaly_nT": round(t["anomaly_nT"], 1),
+                    "polarity": t["polarity"],
+                    "x_m": round(t["x_m"], 2),
+                    "y_m": round(t["y_m"], 2),
+                },
+            }
+            for t in targets
+        ],
+    }
+    with open(out_geojson, "w", encoding="utf-8") as f:
+        json.dump(geojson, f, indent=2)
+
     print(f"\nSaved: {out_csv.name}  ({len(xs)} targets)")
+    print(f"Saved: {out_geojson.name}")
     if len(vals):
         print(f"Strongest        : {vals[np.argmax(np.abs(vals))]:+.1f} nT")
         print(f"|anomaly| range  : {np.abs(vals).min():.0f} ~ "
