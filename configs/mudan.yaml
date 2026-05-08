@@ -77,7 +77,7 @@ viewer:
   netcdf: outputs/hydrospatial_datacube.nc
   tracklines: outputs/tracklines.json
   waterfalls_dir: outputs/waterfalls
-  static_dir: viewer/frontend 
+  static_dir: viewer/frontend/dist
   sediment_rgb_tif: outputs/tif/sbp_sediment_rgb.tif
   contours: outputs/contours_bathymetry.geojson
 
