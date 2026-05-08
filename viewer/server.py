@@ -322,6 +322,14 @@ async def get_tracklines():
     return {"type": "FeatureCollection", "features": []}
 
 
+@app.get("/api/contours")
+async def get_contours():
+    path = ROOT / cfg["viewer"]["contours"]
+    if path.exists():
+        return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+    return {"type": "FeatureCollection", "features": []}
+
+
 @app.get("/api/mag-targets")
 async def get_mag_targets():
     if MAG_TARGETS_PATH.exists():

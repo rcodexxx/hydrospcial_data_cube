@@ -107,7 +107,7 @@ function getContourStyle(layerId) {
 }
 
 function loadStaticContours() {
-    fetch('/viewer/static/contours_bathymetry.geojson')
+    fetch('/api/contours')
         .then(r => {
             if (!r.ok) throw new Error("Contour file not found");
             return r.json();
