@@ -77,9 +77,9 @@ viewer:
   netcdf: outputs/hydrospatial_datacube.nc
   tracklines: outputs/tracklines.json
   waterfalls_dir: outputs/waterfalls
-  static_dir: src/viewer
+  static_dir: viewer/frontend 
   sediment_rgb_tif: outputs/tif/sbp_sediment_rgb.tif
-  contours: src/viewer/static/contours_bathymetry.geojson
+  contours: outputs/contours_bathymetry.geojson
 
   tile_layers:
     - { id: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      label: "Bathymetry",          palette: turbo_r }
