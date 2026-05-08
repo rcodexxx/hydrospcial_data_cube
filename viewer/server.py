@@ -60,6 +60,11 @@ def percentile_range(tif_path, low=2, high=98):
     return float(np.percentile(valid, low)), float(np.percentile(valid, high))
 
 
+def fix_tile_host(url: str) -> str:
+    """localtileserver emits IPv6 URLs without brackets; wrap them per RFC 3986."""
+    return url.replace("://::1:", "://[::1]:")
+
+
 # Module-level state, populated in lifespan startup
 state = {
     "ds": None,
@@ -103,7 +108,7 @@ async def lifespan(_app):
 
         state["tile_clients"][layer["id"]] = {
             "client": client,
-            "url": client.get_tile_url(**url_kwargs),
+            "url": fix_tile_host(client.get_tile_url(**url_kwargs)),
             "label": layer["label"],
             "center": client.center(),
             "bounds": client.bounds(),
@@ -124,7 +129,8 @@ async def lifespan(_app):
 
 app = FastAPI(title="Hydrospatial Data Cube", lifespan=lifespan)
 VIEWER_DIR.mkdir(exist_ok=True)
-app.mount("/viewer", StaticFiles(directory=VIEWER_DIR), name="viewer")
+# Mount Vite-built assets at /assets (matching dist/index.html's references)
+app.mount("/assets", StaticFiles(directory=VIEWER_DIR / "assets"), name="assets")
 if WATERFALLS_DIR.exists():
     app.mount("/waterfalls", StaticFiles(directory=WATERFALLS_DIR), name="waterfalls")
 
@@ -134,7 +140,7 @@ async def index():
     html_path = VIEWER_DIR / "index.html"
     if html_path.exists():
         return html_path.read_text(encoding="utf-8")
-    return "<h1>viewer/index.html not found</h1>"
+    return "<h1>viewer/index.html not found, run npm run build first</h1>"
 
 
 @app.get("/api/layers")
