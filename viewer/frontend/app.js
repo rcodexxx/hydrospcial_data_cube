@@ -4,6 +4,7 @@ import { interpolatePolyline } from './src/utils.js';
 import { initMap, loadTileLayers, bindMapUI } from './src/modules/map.js';
 import { applyLayout, openPanels, closePanels, resizeCanvases, bindLayoutUI } from './src/modules/layout.js';
 import { doPointQuery } from './src/modules/popup.js';
+import { doRegionSelect } from './src/modules/region.js';
 
 const map = initMap();
 loadTileLayers(map);
@@ -114,18 +115,6 @@ map.on('mouseup', (e) => {
         state.lineStart = null;
     }
 });
-
-
-function doRegionSelect(bounds) {
-    const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
-    Promise.all([
-        fetch(`${API}/api/query?lat=${sw.lat}&lon=${sw.lng}`).then(r => r.json()),
-        fetch(`${API}/api/query?lat=${ne.lat}&lon=${ne.lng}`).then(r => r.json())
-    ]).then(([sw_d, ne_d]) => {
-        if (sw_d.error || ne_d.error) return alert("座標轉換失敗！");
-        if (typeof window.build3DScene === 'function') window.build3DScene(sw_d.x_3826, sw_d.y_3826, ne_d.x_3826, ne_d.y_3826);
-    }).catch(err => alert(`API 錯誤: ${err.message}`));
-}
 
 fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => { 
     state.waterfallIndex = data;
