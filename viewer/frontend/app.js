@@ -5,11 +5,15 @@ import { initMap, loadTileLayers, bindMapUI } from './src/modules/map.js';
 import { applyLayout, openPanels, closePanels, resizeCanvases, bindLayoutUI } from './src/modules/layout.js';
 import { doPointQuery } from './src/modules/popup.js';
 import { doRegionSelect } from './src/modules/region.js';
+import { loadTracklines, loadMagTargets, bindTracklinesUI } from './src/modules/tracklines.js';
 
 const map = initMap();
 loadTileLayers(map);
 bindMapUI(map);
 bindLayoutUI();
+loadTracklines();
+loadMagTargets();
+bindTracklinesUI();
 
 
 // 🔧 工具列狀態管理 (單選互斥與自動清場)
@@ -121,6 +125,7 @@ fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => {
     window.waterfallIndex = data;
 });
 
+window.showWaterfallSidebar = showWaterfallSidebar;
 function showWaterfallSidebar(feature) {
     if (!state.waterfallIndex) return;
     const props = feature.properties, filename = props.file;
@@ -343,101 +348,6 @@ function renderProfileChart(containerId, depth, isopach, sediment) {
     window.addEventListener('resize', () => chart.resize());
     setTimeout(() => chart.resize(), 350);
 }
-
-// ── 9. GeoJSON 軌跡線載入 ─────────────────────────────────
-fetch(API + '/api/tracklines').then(r => r.json()).then(geojson => {
-    const commonOptions = {
-        style: (feature) => (feature.properties.instrument === 'SSS') 
-            ? { color: '#ffffff', weight: 3, opacity: 0.8, dashArray: '', lineCap: 'round' }
-            : { color: '#ec4899', weight: 3, opacity: 0.8, dashArray: '' },
-            
-        onEachFeature: (feature, layer) => {
-            const props = feature.properties;
-            const tooltipHtml = `
-                <div class="px-3 py-2 font-sans">
-                    <div class="font-bold text-orange-400 border-b border-slate-600 pb-1 mb-1 text-[11px] uppercase tracking-wider">
-                        ${props.instrument === 'SSS' ? '🌊 Side Scan Sonar' : '🕳️ Sub-bottom Profiler'}
-                    </div>
-                    <div class="text-slate-300 text-xs">File: <span class="text-white font-mono">${props.file || 'Unknown'}</span></div>
-                </div>
-            `;
-            layer.bindTooltip(tooltipHtml, { sticky: true, className: 'custom-track-tooltip' });
-
-            layer.on('click', (e) => { 
-                L.DomEvent.stopPropagation(e); 
-                selectTrackline(feature, layer, feature.properties.instrument === 'SSS' ? state.sssLayer : state.sbpLayer); 
-            });
-            layer.on('mouseover', () => { 
-                if (layer !== state.selectedTrackline) { layer.setStyle({ weight: 5, opacity: 1, color: '#38bdf8' }); layer.bringToFront(); }
-            });
-            layer.on('mouseout', () => { 
-                if (layer !== state.selectedTrackline) { (feature.properties.instrument === 'SSS' ? state.sssLayer : state.sbpLayer).resetStyle(layer); }
-            });
-        }
-    };
-    state.sssLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SSS' });
-    state.sbpLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SBP' });
-});
-
-function selectTrackline(feature, layer, parentLayer) {
-    if (state.selectedTrackline && state.selectedParentLayer) state.selectedParentLayer.resetStyle(state.selectedTrackline);
-    state.selectedTrackline = layer; state.selectedParentLayer = parentLayer;
-    layer.setStyle({ weight: 6, opacity: 1, color: '#F57D15', dashArray: '', filter: 'drop-shadow(0px 0px 4px rgba(245,125,21,0.8))' }); 
-    layer.bringToFront();
-    showWaterfallSidebar(feature); 
-    map.panTo(layer.getBounds().getCenter(), {animate: true});
-}
-
-document.getElementById('chk-trackline-sss')?.addEventListener('change', (e) => { if (e.target.checked && state.sssLayer) state.sssLayer.addTo(map); else if (state.sssLayer) map.removeLayer(state.sssLayer); });
-document.getElementById('chk-trackline-sbp')?.addEventListener('change', (e) => { if (e.target.checked && state.sbpLayer) state.sbpLayer.addTo(map); else if (state.sbpLayer) map.removeLayer(state.sbpLayer); });
-
-
-// ── MAG candidates layer ──
-// Insert this block in app.js right after the existing
-// fetch(API + '/api/tracklines')...then(...) block that creates
-// state.sssLayer and state.sbpLayer.
-
-let magTargetsLayer = null;
-
-fetch(API + '/api/mag-targets').then(r => r.json()).then(geojson => {
-    magTargetsLayer = L.geoJSON(geojson, {
-        pointToLayer: (feature, latlng) => {
-            const a = feature.properties.anomaly_nT;
-            const radius = Math.min(14, Math.max(5, Math.log10(Math.abs(a)) * 4));
-            const fill = a > 0 ? '#ef4444' : '#3b82f6';
-            return L.circleMarker(latlng, {
-                radius,
-                fillColor: fill,
-                color: '#ffffff',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.85,
-            });
-        },
-        onEachFeature: (feature, layer) => {
-            const p = feature.properties;
-            const popupHtml = `
-                <div class="px-2 py-1 font-sans">
-                    <div class="font-bold text-orange-500 border-b border-slate-300 pb-1 mb-1 text-[11px] uppercase tracking-wider">
-                        🧲 MAG Candidate
-                    </div>
-                    <div class="text-xs space-y-0.5">
-                        <div><span class="text-slate-500">ID:</span> <span class="font-mono">${p.target_id}</span></div>
-                        <div><span class="text-slate-500">Anomaly:</span> <span class="font-mono">${p.anomaly_nT > 0 ? '+' : ''}${p.anomaly_nT} nT</span></div>
-                        <div><span class="text-slate-500">Polarity:</span> ${p.polarity}</div>
-                    </div>
-                </div>
-            `;
-            layer.bindPopup(popupHtml);
-        },
-    });
-});
-
-document.getElementById('chk-mag-targets')?.addEventListener('change', (e) => {
-    if (!magTargetsLayer) return;
-    if (e.target.checked) magTargetsLayer.addTo(map);
-    else map.removeLayer(magTargetsLayer);
-});
 
 // ── 11. Three.js 虛擬岩心 (Virtual Borehole) ────────────────
 window.closeBorehole = function() {
