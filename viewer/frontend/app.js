@@ -1,15 +1,5 @@
 import { API, SEDIMENT_COLORS, SED_LABELS, INITIAL_CENTER, INITIAL_ZOOM } from './src/constants.js';
-
-// ── 全域狀態與變數 ─────────────────────────────────────────
-let currentOverlay = null, tileLayers = {};
-let currentBaseLayerId = 'bathymetry'; // 追蹤當前圖層，用來決定等高線顏色
-let contourLayer = null; // 等高線向量圖層
-
-let clickMarker = null, selectRect = null, selectStart = null;
-let sssLayer = null, sbpLayer = null;
-let selectedTrackline = null, selectedParentLayer = null;
-let currentTool = 'pan', lineStart = null, linePreview = null, drawnLine = null;
-let waterfallIndex = null, currentWfPings = 0, mapTrackMarker = null, currentTrackCoords = [];
+import { state } from './src/state.js';
 
 // ── 1. 初始化 Leaflet 地圖 ──────────────────────────────────
 const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 20, minZoom: 15, renderer: L.canvas({ tolerance: 15 }), zoomControl: false });
@@ -50,9 +40,8 @@ map.on('moveend zoomend', () => {
 
 
 // 載入網格影像圖層
-let HAS_ISOPACH = false;
 fetch(API + '/api/layers').then(r => r.json()).then(data => {
-    HAS_ISOPACH = data.features?.has_isopach ?? false;
+    state.HAS_ISOPACH = data.features?.has_isopach  ?? false;
     console.log('Feature flags:', data.features);
     
     if (data.bounds) { 
@@ -60,11 +49,11 @@ fetch(API + '/api/layers').then(r => r.json()).then(data => {
         map.fitBounds(L.latLngBounds(data.bounds).pad(0.05)); 
     }
     for (const [key, cfg] of Object.entries(data.layers)) { 
-        tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 20, maxNativeZoom: 18 }); 
+        state.tileLayers[key] = L.tileLayer(cfg.url, { opacity: 0.75, maxZoom: 20, maxNativeZoom: 18 }); 
     }
-    if (tileLayers['bathymetry']) { 
-        tileLayers['bathymetry'].addTo(map); 
-        currentOverlay = tileLayers['bathymetry']; 
+    if (state.tileLayers['bathymetry']) { 
+        state.tileLayers['bathymetry'].addTo(map); 
+        state.currentOverlay = state.tileLayers['bathymetry']; 
     }
 });
 
@@ -96,14 +85,14 @@ function loadStaticContours() {
             return r.json();
         })
         .then(geojson => {
-            contourLayer = L.geoJSON(geojson, { 
-                style: getContourStyle(currentBaseLayerId),
+            state.contourLayer = L.geoJSON(geojson, { 
+                style: getContourStyle(state.currentBaseLayerId),
                 interactive: false // 讓滑鼠穿透等高線，不干擾點擊
             });
             
             // 預設開啟等高線
             if (document.getElementById('chk-contours')?.checked) {
-                contourLayer.addTo(map);
+                state.contourLayer.addTo(map);
             }
         })
         .catch(err => console.log("等待執行 build_datacube.py 產出靜態等高線...", err));
@@ -111,8 +100,8 @@ function loadStaticContours() {
 
 // 綁定等高線 UI 開關
 document.getElementById('chk-contours')?.addEventListener('change', (e) => {
-    if (e.target.checked && contourLayer) contourLayer.addTo(map);
-    else if (contourLayer) map.removeLayer(contourLayer);
+    if (e.target.checked && state.contourLayer) state.contourLayer.addTo(map);
+    else if (state.contourLayer) map.removeLayer(state.contourLayer);
 });
 
 // 底質圖例
@@ -215,8 +204,8 @@ document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
 
 window.closePanels = function() {
     currentRightWidth = 0; currentBottomHeight = 0; applyLayout();
-    if (mapTrackMarker) { map.removeLayer(mapTrackMarker); mapTrackMarker = null; }
-    if (selectedTrackline && selectedParentLayer) { selectedParentLayer.resetStyle(selectedTrackline); selectedTrackline = null; }
+    if (state.mapTrackMarker) { map.removeLayer(state.mapTrackMarker); state.mapTrackMarker = null; }
+    if (state.selectedTrackline && state.selectedParentLayer) { state.selectedParentLayer.resetStyle(state.selectedTrackline); state.selectedTrackline = null; }
 }
 
 // ── 4. UI 事件綁定 (互斥圖層與工具列) ───────────────────────
@@ -224,7 +213,7 @@ document.querySelectorAll('.layer-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         const targetBtn = e.currentTarget;
         const layerId = targetBtn.dataset.layer;
-        currentBaseLayerId = layerId; // 記錄當前圖層
+        state.currentBaseLayerId = layerId; // 記錄當前圖層
 
         // 按鈕 UI 切換
         document.querySelectorAll('.layer-btn').forEach(b => { 
@@ -251,11 +240,11 @@ document.querySelectorAll('.layer-btn').forEach(btn => {
         }
 
         // 載入底圖
-        if (!tileLayers[layerId]) return;
-        if (currentOverlay) map.removeLayer(currentOverlay);
-        tileLayers[layerId].setOpacity(document.getElementById('opacity-slider').value / 100);
-        tileLayers[layerId].addTo(map); 
-        currentOverlay = tileLayers[layerId];
+        if (!state.tileLayers[layerId]) return;
+        if (state.currentOverlay) map.removeLayer(state.currentOverlay);
+        state.tileLayers[layerId].setOpacity(document.getElementById('opacity-slider').value / 100);
+        state.tileLayers[layerId].addTo(map); 
+        state.currentOverlay = state.tileLayers[layerId];
 
         // 等深線
         const chkContours = document.getElementById('chk-contours');
@@ -268,13 +257,13 @@ document.querySelectorAll('.layer-btn').forEach(btn => {
             }
             
             // 根據 Checkbox 狀態與圖層 ID，更新等高線顯示
-            if (contourLayer) {
-                contourLayer.setStyle(getContourStyle(currentBaseLayerId));
+            if (state.contourLayer) {
+                state.contourLayer.setStyle(getContourStyle(state.currentBaseLayerId));
                 if (chkContours.checked) {
-                    if (!map.hasLayer(contourLayer)) contourLayer.addTo(map);
-                    contourLayer.bringToFront();
+                    if (!map.hasLayer(state.contourLayer)) state.contourLayer.addTo(map);
+                    state.contourLayer.bringToFront();
                 } else {
-                    if (map.hasLayer(contourLayer)) map.removeLayer(contourLayer);
+                    if (map.hasLayer(state.contourLayer)) map.removeLayer(state.contourLayer);
                 }
             }
         }
@@ -306,12 +295,12 @@ document.querySelectorAll('.imagery-freq-btn').forEach(btn => {
         });
 
         // Switch tile layer
-        if (currentOverlay) map.removeLayer(currentOverlay);
-        if (tileLayers[newLayerId]) {
-            tileLayers[newLayerId].setOpacity(document.getElementById('opacity-slider').value / 100);
-            tileLayers[newLayerId].addTo(map);
-            currentOverlay = tileLayers[newLayerId];
-            currentBaseLayerId = newLayerId;
+        if (state.currentOverlay) map.removeLayer(state.currentOverlay);
+        if (state.tileLayers[newLayerId]) {
+            state.tileLayers[newLayerId].setOpacity(document.getElementById('opacity-slider').value / 100);
+            state.tileLayers[newLayerId].addTo(map);
+            state.currentOverlay = state.tileLayers[newLayerId];
+            state.currentBaseLayerId = newLayerId;
         }
     });
 });
@@ -326,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 document.getElementById('opacity-slider')?.addEventListener('input', (e) => { 
-    if (currentOverlay) currentOverlay.setOpacity(e.target.value / 100); 
+    if (state.currentOverlay) state.currentOverlay.setOpacity(e.target.value / 100); 
 });
 
 // 🔧 工具列狀態管理 (單選互斥與自動清場)
@@ -347,17 +336,17 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
         if (typeof window.close3D === 'function') window.close3D();
         if (typeof window.closeBorehole === 'function') window.closeBorehole();
         
-        if (linePreview) { map.removeLayer(linePreview); linePreview = null; } lineStart = null;
-        if (selectRect) { map.removeLayer(selectRect); selectRect = null; } selectStart = null;
-        if (drawnLine) { map.removeLayer(drawnLine); drawnLine = null; }
-        if (clickMarker) { map.removeLayer(clickMarker); clickMarker = null; }
+        if (state.linePreview) { map.removeLayer(state.linePreview); state.linePreview = null; } state.lineStart = null;
+        if (state.selectRect) { map.removeLayer(state.selectRect); state.selectRect = null; } state.selectStart = null;
+        if (state.drawnLine) { map.removeLayer(state.drawnLine); state.drawnLine = null; }
+        if (state.clickMarker) { map.removeLayer(state.clickMarker); state.clickMarker = null; }
 
-        currentTool = toolId;
+        state.currentTool = toolId;
         const mapDiv = document.getElementById('map');
         mapDiv.classList.remove('cursor-pan', 'cursor-query', 'cursor-line', 'cursor-select');
-        mapDiv.classList.add(`cursor-${currentTool}`);
+        mapDiv.classList.add(`cursor-${state.currentTool}`);
         
-        if (currentTool === 'pan') {
+        if (state.currentTool === 'pan') {
             map.dragging.enable();
             map.touchZoom.enable();
             map.doubleClickZoom.enable();
@@ -379,10 +368,10 @@ window.resetMapState = function() {
     if (typeof window.close3D === 'function') window.close3D();
     if (typeof window.closeBorehole === 'function') window.closeBorehole();
     
-    if (clickMarker) { map.removeLayer(clickMarker); clickMarker = null; }
-    if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
-    if (linePreview) { map.removeLayer(linePreview); linePreview = null; }
-    if (drawnLine) { map.removeLayer(drawnLine); drawnLine = null; }
+    if (state.clickMarker) { map.removeLayer(state.clickMarker); state.clickMarker = null; }
+    if (state.selectRect) { map.removeLayer(state.selectRect); state.selectRect = null; }
+    if (state.linePreview) { map.removeLayer(state.linePreview); state.linePreview = null; }
+    if (state.drawnLine) { map.removeLayer(state.drawnLine); state.drawnLine = null; }
     
     map.setView(INITIAL_CENTER, INITIAL_ZOOM);
     document.getElementById('btn-tool-pan')?.click();
@@ -390,53 +379,53 @@ window.resetMapState = function() {
 document.getElementById('btn-reset')?.addEventListener('click', resetMapState);
 
 // ── 5. 地圖滑鼠事件 (Map Interactions) ─────────────────────
-map.on('click', (e) => { if (currentTool === 'query') doPointQuery(e.latlng.lat, e.latlng.lng); });
-map.on('mousedown', (e) => { if (currentTool === 'select') selectStart = e.latlng; else if (currentTool === 'line') lineStart = e.latlng; });
+map.on('click', (e) => { if (state.currentTool === 'query') doPointQuery(e.latlng.lat, e.latlng.lng); });
+map.on('mousedown', (e) => { if (state.currentTool === 'select') state.selectStart = e.latlng; else if (state.currentTool === 'line') state.lineStart = e.latlng; });
 map.on('mousemove', (e) => {
     const cd = document.getElementById('coord-display'); if(cd) cd.textContent = `${e.latlng.lat.toFixed(6)}°N, ${e.latlng.lng.toFixed(6)}°E`;
-    if (currentTool === 'select' && selectStart) {
-        if (selectRect) map.removeLayer(selectRect);
-        selectRect = L.rectangle([selectStart, e.latlng], { color: '#2563eb', weight: 2, fillOpacity: 0.15, dashArray: '5,5' }).addTo(map);
+    if (state.currentTool === 'select' && state.selectStart) {
+        if (state.selectRect) map.removeLayer(state.selectRect);
+        state.selectRect = L.rectangle([state.selectStart, e.latlng], { color: '#2563eb', weight: 2, fillOpacity: 0.15, dashArray: '5,5' }).addTo(map);
     }
-    if (currentTool === 'line' && lineStart) {
-        if (linePreview) map.removeLayer(linePreview);
-        linePreview = L.polyline([lineStart, e.latlng], { color: '#F57D15', weight: 3, dashArray: '8,4' }).addTo(map);
+    if (state.currentTool === 'line' && state.lineStart) {
+        if (state.linePreview) map.removeLayer(state.linePreview);
+        state.linePreview = L.polyline([state.lineStart, e.latlng], { color: '#F57D15', weight: 3, dashArray: '8,4' }).addTo(map);
     }
 });
 map.on('mouseup', (e) => {
-    if (currentTool === 'select' && selectStart) {
-        const bounds = L.latLngBounds(selectStart, e.latlng); selectStart = null;
+    if (state.currentTool === 'select' && state.selectStart) {
+        const bounds = L.latLngBounds(state.selectStart, e.latlng); state.selectStart = null;
         if (!bounds.getNorthEast().equals(bounds.getSouthWest())) doRegionSelect(bounds);
     }
-    if (currentTool === 'line' && lineStart) {
-        const endPoint = e.latlng; if (linePreview) map.removeLayer(linePreview); linePreview = null;
-        if (map.distance(lineStart, endPoint) > 5) {
-            if (drawnLine) map.removeLayer(drawnLine);
-            drawnLine = L.polyline([lineStart, endPoint], { color: '#F57D15', weight: 3 }).addTo(map);
+    if (state.currentTool === 'line' && state.lineStart) {
+        const endPoint = e.latlng; if (state.linePreview) map.removeLayer(state.linePreview); state.linePreview = null;
+        if (map.distance(state.lineStart, endPoint) > 5) {
+            if (state.drawnLine) map.removeLayer(state.drawnLine);
+            state.drawnLine = L.polyline([state.lineStart, endPoint], { color: '#F57D15', weight: 3 }).addTo(map);
             
             openPanels('drawn-line');
             const bpTitle = document.getElementById('bp-title');
             if(bpTitle) bpTitle.textContent = '✏️ Hand-Drawn Profile';
             
-            currentTrackCoords = interpolatePolyline([[lineStart.lng, lineStart.lat], [endPoint.lng, endPoint.lat]], 100);
-            currentWfPings = 100;
-            const d = map.distance(lineStart, endPoint);
+            state.currentTrackCoords = interpolatePolyline([[state.lineStart.lng, state.lineStart.lat], [endPoint.lng, endPoint.lat]], 100);
+            state.currentWfPings = 100;
+            const d = map.distance(state.lineStart, endPoint);
             const infoText = document.getElementById('bp-info-text');
             if(infoText) infoText.textContent = `Length: ${d.toFixed(0)}m`;
             
-            const coordStr2 = currentTrackCoords.map(c => `${c[0]},${c[1]}`).join(';');
+            const coordStr2 = state.currentTrackCoords.map(c => `${c[0]},${c[1]}`).join(';');
             fetch(`${API}/api/profile?coords=${encodeURIComponent(coordStr2)}`)
                 .then(r => r.json())
                 .then(data => { renderProfileChart('bp-echarts-container', data.depth, data.isopach, data.sediment); });
         }
-        lineStart = null;
+        state.lineStart = null;
     }
 });
 
 // ── 6. 點擊查詢邏輯 (Point Query Popup) ────────────────────
 function doPointQuery(lat, lon) {
-    if (clickMarker) { clickMarker.setLatLng([lat, lon]); } 
-    else { clickMarker = L.circleMarker([lat, lon], { radius: 6, color: '#F57D15', fillColor: '#F57D15', fillOpacity: 0.8, weight: 2 }).addTo(map); }
+    if (state.clickMarker) { state.clickMarker.setLatLng([lat, lon]); } 
+    else { state.clickMarker = L.circleMarker([lat, lon], { radius: 6, color: '#F57D15', fillColor: '#F57D15', fillOpacity: 0.8, weight: 2 }).addTo(map); }
 
     const popup = L.popup({ maxWidth: 300, autoClose: true, closeOnClick: true, autoPanPadding: [20, 20] })
         .setLatLng([lat, lon])
@@ -528,37 +517,37 @@ function openPanels(mode) {
 }
 
 fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => { 
-    waterfallIndex = data;
+    state.waterfallIndex = data;
     window.waterfallIndex = data;
 });
 
 function showWaterfallSidebar(feature) {
-    if (!waterfallIndex) return;
+    if (!state.waterfallIndex) return;
     const props = feature.properties, filename = props.file;
-    currentTrackCoords = interpolatePolyline(feature.geometry.coordinates, 100); 
-    currentWfPings = props.pings || 100;
+    state.currentTrackCoords = interpolatePolyline(feature.geometry.coordinates, 100); 
+    state.currentWfPings = props.pings || 100;
     
     if (props.instrument === 'SSS') {
         openPanels('sss');
         document.getElementById('rp-title').textContent = `SSS Viewer - ${filename || 'Unknown'}`;
         document.getElementById('rp-echarts-cursor')?.classList.remove('hidden');
         // Sidebar shows LF preview (overview-friendly); HF detail is in modal
-        const lfEntry = waterfallIndex.sss[`${filename}_LF`];
+        const lfEntry = state.waterfallIndex.sss[`${filename}_LF`];
         if (lfEntry) document.getElementById('img-preview').src = `/waterfalls/${lfEntry.image}`;
         // Wire up the "放大" button to open the modal
         document.getElementById('rp-expand-btn').onclick = () => {
             window.SSSModal?.open(filename);
         };
-        loadProfileData('rp', currentTrackCoords);
+        loadProfileData('rp', state.currentTrackCoords);
     } else if (props.instrument === 'SBP') {
         openPanels('sbp');
         document.getElementById('bp-title').textContent = `SBP Viewer - ${filename || 'Unknown'}`;
         document.getElementById('bp-echarts-cursor')?.classList.remove('hidden');
-        if (waterfallIndex.sbp[filename]) {
-            document.getElementById('bp-sbp-image').src = `/waterfalls/${waterfallIndex.sbp[filename].image}`;
+        if (state.waterfallIndex.sbp[filename]) {
+            document.getElementById('bp-sbp-image').src = `/waterfalls/${state.waterfallIndex.sbp[filename].image}`;
             document.getElementById('bp-sbp-cursor')?.classList.remove('hidden');
         }
-        loadProfileData('bp', currentTrackCoords);
+        loadProfileData('bp', state.currentTrackCoords);
     }
 }
 
@@ -609,16 +598,16 @@ function handleSlider(e, panelPrefix) {
     // ==========================================
     // 3. 處理地圖上的 2D 軌跡雷達動畫與文字標籤 (維持不變)
     // ==========================================
-    if (currentTrackCoords.length > 0) {
-        const dataIndex = Math.min(Math.floor(pct * currentTrackCoords.length), currentTrackCoords.length - 1);
-        const coord = currentTrackCoords[dataIndex];
+    if (state.currentTrackCoords.length > 0) {
+        const dataIndex = Math.min(Math.floor(pct * state.currentTrackCoords.length), state.currentTrackCoords.length - 1);
+        const coord = state.currentTrackCoords[dataIndex];
         
         // 更新地圖上的橘色雷達波紋
-        if (mapTrackMarker) {
-            mapTrackMarker.setLatLng([coord[1], coord[0]]);
+        if (state.mapTrackMarker) {
+            state.mapTrackMarker.setLatLng([coord[1], coord[0]]);
         } else {
             const sonarIcon = L.divIcon({ className: 'sonar-ping-marker', iconSize: [12, 12], iconAnchor: [6, 6] });
-            mapTrackMarker = L.marker([coord[1], coord[0]], { icon: sonarIcon }).addTo(map);
+            state.mapTrackMarker = L.marker([coord[1], coord[0]], { icon: sonarIcon }).addTo(map);
         }
         
         // 更新文字面板資訊
@@ -641,8 +630,8 @@ function renderProfileChart(containerId, depth, isopach, sediment) {
     const chart = echarts.init(container);
     container._chart = chart;
 
-    // Detect if isopach is actually available (might be null even if HAS_ISOPACH)
-    const showIsopach = HAS_ISOPACH && isopach && isopach.some(v => v !== null && !isNaN(v));
+    // Detect if isopach is actually available (might be null even if state.HAS_ISOPACH)
+    const showIsopach = state.HAS_ISOPACH && isopach && isopach.some(v => v !== null && !isNaN(v));
 
     const seafloor = [], subbottom = [];
     const validDepths = depth.filter(v => v !== null && !isNaN(v));
@@ -776,37 +765,37 @@ fetch(API + '/api/tracklines').then(r => r.json()).then(geojson => {
 
             layer.on('click', (e) => { 
                 L.DomEvent.stopPropagation(e); 
-                selectTrackline(feature, layer, feature.properties.instrument === 'SSS' ? sssLayer : sbpLayer); 
+                selectTrackline(feature, layer, feature.properties.instrument === 'SSS' ? state.sssLayer : state.sbpLayer); 
             });
             layer.on('mouseover', () => { 
-                if (layer !== selectedTrackline) { layer.setStyle({ weight: 5, opacity: 1, color: '#38bdf8' }); layer.bringToFront(); }
+                if (layer !== state.selectedTrackline) { layer.setStyle({ weight: 5, opacity: 1, color: '#38bdf8' }); layer.bringToFront(); }
             });
             layer.on('mouseout', () => { 
-                if (layer !== selectedTrackline) { (feature.properties.instrument === 'SSS' ? sssLayer : sbpLayer).resetStyle(layer); }
+                if (layer !== state.selectedTrackline) { (feature.properties.instrument === 'SSS' ? state.sssLayer : state.sbpLayer).resetStyle(layer); }
             });
         }
     };
-    sssLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SSS' });
-    sbpLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SBP' });
+    state.sssLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SSS' });
+    state.sbpLayer = L.geoJSON(geojson, { ...commonOptions, filter: (f) => f.properties.instrument === 'SBP' });
 });
 
 function selectTrackline(feature, layer, parentLayer) {
-    if (selectedTrackline && selectedParentLayer) selectedParentLayer.resetStyle(selectedTrackline);
-    selectedTrackline = layer; selectedParentLayer = parentLayer;
+    if (state.selectedTrackline && state.selectedParentLayer) state.selectedParentLayer.resetStyle(state.selectedTrackline);
+    state.selectedTrackline = layer; state.selectedParentLayer = parentLayer;
     layer.setStyle({ weight: 6, opacity: 1, color: '#F57D15', dashArray: '', filter: 'drop-shadow(0px 0px 4px rgba(245,125,21,0.8))' }); 
     layer.bringToFront();
     showWaterfallSidebar(feature); 
     map.panTo(layer.getBounds().getCenter(), {animate: true});
 }
 
-document.getElementById('chk-trackline-sss')?.addEventListener('change', (e) => { if (e.target.checked && sssLayer) sssLayer.addTo(map); else if (sssLayer) map.removeLayer(sssLayer); });
-document.getElementById('chk-trackline-sbp')?.addEventListener('change', (e) => { if (e.target.checked && sbpLayer) sbpLayer.addTo(map); else if (sbpLayer) map.removeLayer(sbpLayer); });
+document.getElementById('chk-trackline-sss')?.addEventListener('change', (e) => { if (e.target.checked && state.sssLayer) state.sssLayer.addTo(map); else if (state.sssLayer) map.removeLayer(state.sssLayer); });
+document.getElementById('chk-trackline-sbp')?.addEventListener('change', (e) => { if (e.target.checked && state.sbpLayer) state.sbpLayer.addTo(map); else if (state.sbpLayer) map.removeLayer(state.sbpLayer); });
 
 
 // ── MAG candidates layer ──
 // Insert this block in app.js right after the existing
 // fetch(API + '/api/tracklines')...then(...) block that creates
-// sssLayer and sbpLayer.
+// state.sssLayer and state.sbpLayer.
 
 let magTargetsLayer = null;
 
@@ -921,7 +910,7 @@ window.buildBoreholeScene = function(lat, lon, title = "虛擬岩心探測") {
     fetch(`${API}/api/query?lat=${lat}&lon=${lon}`).then(r => r.json()).then(data => {
         if (data.error) { window.closeBorehole(); return alert(data.error); }
         const depth = data.bathymetry?.value || 0;
-        const isopach = HAS_ISOPACH ? (data.isopach?.value ?? null) : null;
+        const isopach = state.HAS_ISOPACH ? (data.isopach?.value ?? null) : null;
         const sedClassId = data.sediment_class?.class_id ?? -1;
         const sedName = data.sediment_class?.value || 'Unknown';
 
