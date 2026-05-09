@@ -1,19 +1,4 @@
-const API = '';
-
-const SEDIMENT_COLORS = [
-    "#A0522D",  // 0: Coarse sand
-    "#CD853F",  // 1: Fine sand / Silty sand
-    "#DEB887",  // 2: Silt / Sandy silt
-    "#BDB76B",  // 3: Sand-silt-clay
-    "#8FBC8F",  // 4: Compacted mud
-    "#6495ED",  // 5: Clayey silt / Silty clay
-    "#2E5C8A",  // 6: Fluid mud
-];
-
-const SED_LABELS = [
-    'Coarse sand', 'Fine sand / Silty sand', 'Silt / Sandy silt',
-    'Sand-silt-clay', 'Compacted mud', 'Clayey silt / Silty clay', 'Fluid mud'
-];
+import { API, SEDIMENT_COLORS, SED_LABELS, INITIAL_CENTER, INITIAL_ZOOM } from './src/constants.js';
 
 // ── 全域狀態與變數 ─────────────────────────────────────────
 let currentOverlay = null, tileLayers = {};
@@ -25,8 +10,6 @@ let sssLayer = null, sbpLayer = null;
 let selectedTrackline = null, selectedParentLayer = null;
 let currentTool = 'pan', lineStart = null, linePreview = null, drawnLine = null;
 let waterfallIndex = null, currentWfPings = 0, mapTrackMarker = null, currentTrackCoords = [];
-
-const INITIAL_CENTER = [22.137, 120.785], INITIAL_ZOOM = 15;
 
 // ── 1. 初始化 Leaflet 地圖 ──────────────────────────────────
 const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 20, minZoom: 15, renderer: L.canvas({ tolerance: 15 }), zoomControl: false });
