@@ -1,5 +1,6 @@
 import { API, SEDIMENT_COLORS, SED_LABELS, INITIAL_CENTER, INITIAL_ZOOM } from './src/constants.js';
 import { state } from './src/state.js';
+import { interpolatePolyline } from './src/utils.js';
 
 // ── 1. 初始化 Leaflet 地圖 ──────────────────────────────────
 const map = L.map('map', { center: INITIAL_CENTER, zoom: INITIAL_ZOOM, maxZoom: 20, minZoom: 15, renderer: L.canvas({ tolerance: 15 }), zoomControl: false });
@@ -119,34 +120,6 @@ sedLegend.onAdd = function() {
     return div;
 };
 let sedLegendAdded = false;
-
-// ── 2. 工具函式 (插值) ──────────────────────────────────────
-function interpolatePolyline(coords, numPoints) {
-    if (coords.length < 2) return Array(numPoints).fill(coords[0] || [0,0]);
-    const cumDist = [0];
-    for (let i = 1; i < coords.length; i++) {
-        cumDist.push(cumDist[i-1] + map.distance(L.latLng(coords[i-1][1], coords[i-1][0]), L.latLng(coords[i][1], coords[i][0])));
-    }
-    const totalDist = cumDist[cumDist.length - 1];
-    if (totalDist === 0) return Array(numPoints).fill(coords[0]);
-    
-    const step = totalDist / (numPoints - 1);
-    const result = [];
-    for (let i = 0; i < numPoints; i++) {
-        const targetDist = i * step;
-        if (i === 0) { result.push(coords[0]); continue; }
-        if (i === numPoints - 1) { result.push(coords[coords.length - 1]); continue; }
-        
-        let segIdx = cumDist.findIndex(d => d >= targetDist) - 1;
-        if (segIdx < 0) segIdx = 0;
-        
-        const ratio = (targetDist - cumDist[segIdx]) / (cumDist[segIdx + 1] - cumDist[segIdx]);
-        const lon = coords[segIdx][0] + ratio * (coords[segIdx+1][0] - coords[segIdx][0]);
-        const lat = coords[segIdx][1] + ratio * (coords[segIdx+1][1] - coords[segIdx][1]);
-        result.push([lon, lat]);
-    }
-    return result;
-}
 
 // ── 3. 佈局引擎 (Layout Manager) ──────────────────────────
 const mapWrapper = document.getElementById('map-wrapper');
@@ -407,7 +380,7 @@ map.on('mouseup', (e) => {
             const bpTitle = document.getElementById('bp-title');
             if(bpTitle) bpTitle.textContent = '✏️ Hand-Drawn Profile';
             
-            state.currentTrackCoords = interpolatePolyline([[state.lineStart.lng, state.lineStart.lat], [endPoint.lng, endPoint.lat]], 100);
+            state.currentTrackCoords = interpolatePolyline(map, [[state.lineStart.lng, state.lineStart.lat], [endPoint.lng, endPoint.lat]], 100);
             state.currentWfPings = 100;
             const d = map.distance(state.lineStart, endPoint);
             const infoText = document.getElementById('bp-info-text');
@@ -524,7 +497,7 @@ fetch(API + '/api/waterfall-index').then(r => r.json()).then(data => {
 function showWaterfallSidebar(feature) {
     if (!state.waterfallIndex) return;
     const props = feature.properties, filename = props.file;
-    state.currentTrackCoords = interpolatePolyline(feature.geometry.coordinates, 100); 
+    state.currentTrackCoords = interpolatePolyline(map, feature.geometry.coordinates, 100);
     state.currentWfPings = props.pings || 100;
     
     if (props.instrument === 'SSS') {
