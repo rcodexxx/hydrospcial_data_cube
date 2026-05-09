@@ -4,6 +4,7 @@ import { interpolatePolyline } from '../utils.js';
 import { openPanels, closePanels } from './layout.js';
 import { doPointQuery } from './popup.js';
 import { doRegionSelect } from './region.js';
+import { renderProfileChart } from './waterfall.js';
 
 
 function bindToolButtons() {
@@ -122,9 +123,7 @@ function bindMapMouseEvents() {
                 fetch(`${API}/api/profile?coords=${encodeURIComponent(coordStr)}`)
                     .then(r => r.json())
                     .then(data => {
-                        if (typeof window.renderProfileChart === 'function') {
-                            window.renderProfileChart('bp-echarts-container', data.depth, data.isopach, data.sediment);
-                        }
+                        renderProfileChart('bp-echarts-container', data.depth, data.isopach, data.sediment);
                     });
             }
             state.lineStart = null;

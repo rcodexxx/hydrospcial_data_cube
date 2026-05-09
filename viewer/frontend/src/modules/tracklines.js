@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import { API } from '../constants.js';
+import { showWaterfallSidebar } from './waterfall.js';
 
 let magTargetsLayer = null;
 
@@ -16,11 +17,7 @@ function selectTrackline(feature, layer, parentLayer) {
         filter: 'drop-shadow(0px 0px 4px rgba(245,125,21,0.8))',
     });
     layer.bringToFront();
-
-    if (typeof window.showWaterfallSidebar === 'function') {
-        window.showWaterfallSidebar(feature);
-    }
-
+    showWaterfallSidebar(feature);
     state.map.panTo(layer.getBounds().getCenter(), { animate: true });
 }
 
