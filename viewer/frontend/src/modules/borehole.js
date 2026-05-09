@@ -1,8 +1,10 @@
+import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { state } from '../state.js';
 import { API, SEDIMENT_COLORS } from '../constants.js';
 
 
-function closeBorehole() {
+export function closeBorehole() {
     const modal = document.getElementById('modal-borehole');
     if (modal) modal.classList.add('hidden');
 
@@ -23,7 +25,7 @@ function closeBorehole() {
 }
 
 
-function buildBoreholeScene(lat, lon, title = "虛擬岩心探測") {
+export function buildBoreholeScene(lat, lon, title = "虛擬岩心探測") {
     if (typeof THREE === 'undefined') return alert("找不到 Three.js！");
 
     const modal = document.getElementById('modal-borehole');
@@ -74,7 +76,7 @@ function initBorehole3D(container, data) {
     window.currentBoreholeRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(window.currentBoreholeRenderer.domElement);
 
-    window.currentBoreholeControls = new THREE.OrbitControls(camera, window.currentBoreholeRenderer.domElement);
+    window.currentBoreholeControls = new OrbitControls(camera, window.currentBoreholeRenderer.domElement);
     window.currentBoreholeControls.enableDamping = true;
     window.currentBoreholeControls.target.set(0, -5, 0);
 
@@ -145,9 +147,6 @@ function initBorehole3D(container, data) {
 }
 
 
-export function exposeBorehole() {
-    // Expose for popup HTML inline onclick (Step 13 will refactor that)
-    // and toolbar.js close-on-tool-switch logic.
-    window.buildBoreholeScene = buildBoreholeScene;
-    window.closeBorehole = closeBorehole;
+export function bindBorehole() {
+    document.getElementById('btn-close-borehole')?.addEventListener('click', closeBorehole);
 }

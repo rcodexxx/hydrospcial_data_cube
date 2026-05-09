@@ -1,3 +1,4 @@
+import L from 'leaflet';
 import { state } from '../state.js';
 import { API } from '../constants.js';
 import { showWaterfallSidebar } from './waterfall.js';

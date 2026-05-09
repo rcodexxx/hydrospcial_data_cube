@@ -1,3 +1,5 @@
+import L from 'leaflet' 
+import * as echarts from 'echarts'
 import { state } from '../state.js';
 import { API, SEDIMENT_COLORS } from '../constants.js';
 import { interpolatePolyline } from '../utils.js';

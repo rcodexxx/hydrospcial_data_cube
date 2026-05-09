@@ -1,3 +1,4 @@
+import OpenSeadragon from 'openseadragon';
 /**
  * SSS Modal: full-screen OpenSeadragon viewer for detailed UCH inspection.
  *

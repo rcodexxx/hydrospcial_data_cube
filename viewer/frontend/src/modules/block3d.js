@@ -1,7 +1,9 @@
+import * as THREE from 'three' 
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { API, SEDIMENT_COLORS, SED_LABELS } from '../constants.js';
 
 
-function close3D() {
+export function close3D() {
     const modal = document.getElementById('modal-3d');
     if (!modal) return;
     modal.classList.add('hidden');
@@ -23,7 +25,7 @@ function close3D() {
 }
 
 
-function build3DScene(x0, y0, x1, y1) {
+export function build3DScene(x0, y0, x1, y1) {
     if (typeof THREE === 'undefined') return alert("找不到 Three.js！");
 
     const modal = document.getElementById('modal-3d');
@@ -73,7 +75,7 @@ function initThreeJS(container, data) {
     window.currentRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(window.currentRenderer.domElement);
 
-    window.currentControls = new THREE.OrbitControls(camera, window.currentRenderer.domElement);
+    window.currentControls = new OrbitControls(camera, window.currentRenderer.domElement);
     window.currentControls.enableDamping = true;
     window.currentControls.autoRotate = false;
 
@@ -242,9 +244,6 @@ function initThreeJS(container, data) {
 }
 
 
-export function exposeBlock3D() {
-    // Expose for region.js (via window.build3DScene), HTML inline onclick (window.close3D),
-    // and toolbar.js close-on-tool-switch logic.
-    window.build3DScene = build3DScene;
-    window.close3D = close3D;
+export function bindBlock3D() {
+    document.getElementById('btn-close-3d')?.addEventListener('click', close3D);
 }

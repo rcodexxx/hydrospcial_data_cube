@@ -1,5 +1,5 @@
 // Pure helper functions — no state, no DOM access.
-
+import L from 'leaflet';
 /**
  * Interpolate a polyline (in [lon, lat] format) into N evenly-spaced points
  * by distance along the line.

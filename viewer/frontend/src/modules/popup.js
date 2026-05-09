@@ -1,5 +1,7 @@
+import L from 'leaflet';
 import { state } from '../state.js';
 import { API, SEDIMENT_COLORS } from '../constants.js';
+import { buildBoreholeScene } from './borehole.js';
 
 
 export function doPointQuery(lat, lon) {
@@ -75,13 +77,18 @@ export function doPointQuery(lat, lon) {
                 }
 
                 html += `
-                    <button onclick="if(typeof window.buildBoreholeScene === 'function') window.buildBoreholeScene(${lat}, ${lon})" class="mt-2 w-full py-1.5 bg-slate-800 hover:bg-orange-500 text-white text-xs font-bold rounded shadow-sm transition-colors flex items-center justify-center gap-1">
+                    <button class="borehole-trigger mt-2 w-full py-1.5 bg-slate-800 hover:bg-orange-500 text-white text-xs font-bold rounded shadow-sm transition-colors flex items-center justify-center gap-1">
                         🕳️ 鑽取虛擬岩心
                     </button>
                 `;
             }
             popup.setContent(html + `</div>`);
             popup.update();
+
+            // Bind borehole trigger after popup is rendered
+            const popupEl = popup.getElement();
+            const boreholeBtn = popupEl?.querySelector('.borehole-trigger');
+            boreholeBtn?.addEventListener('click', () => buildBoreholeScene(lat, lon));
         })
         .catch(err => {
             popup.setContent(`<div class="w-56 p-3 text-red-500 text-xs font-bold text-center">⚠️ 介面渲染失敗</div>`);

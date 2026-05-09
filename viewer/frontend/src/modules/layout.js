@@ -1,3 +1,4 @@
+import L from 'leaflet';
 import { state } from '../state.js';
 
 const mapWrapper = document.getElementById('map-wrapper');
@@ -179,6 +180,7 @@ export function bindLayoutUI() {
 
     bindResizers();
 
-    // For HTML inline onclick="closePanels()" to still work
-    window.closePanels = closePanels;
+    // Close buttons for panels
+    document.getElementById('btn-close-bp')?.addEventListener('click', closePanels);
+    document.getElementById('btn-close-rp')?.addEventListener('click', closePanels);
 }

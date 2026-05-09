@@ -1,3 +1,4 @@
+import L from 'leaflet';
 import { state } from '../state.js';
 import { API, INITIAL_CENTER, INITIAL_ZOOM } from '../constants.js';
 import { interpolatePolyline } from '../utils.js';
@@ -5,6 +6,8 @@ import { openPanels, closePanels } from './layout.js';
 import { doPointQuery } from './popup.js';
 import { doRegionSelect } from './region.js';
 import { renderProfileChart } from './waterfall.js';
+import { closeBorehole } from './borehole.js';
+import { close3D } from './block3d.js';
 
 
 function bindToolButtons() {
@@ -24,8 +27,8 @@ function bindToolButtons() {
 
             map.closePopup();
             closePanels();
-            if (typeof window.close3D === 'function') window.close3D();
-            if (typeof window.closeBorehole === 'function') window.closeBorehole();
+            close3D();
+            closeBorehole();
 
             if (state.linePreview) { map.removeLayer(state.linePreview); state.linePreview = null; }
             state.lineStart = null;
@@ -136,8 +139,8 @@ function resetMapState() {
     const map = state.map;
     closePanels();
     map.closePopup();
-    if (typeof window.close3D === 'function') window.close3D();
-    if (typeof window.closeBorehole === 'function') window.closeBorehole();
+    close3D();
+    closeBorehole();
 
     if (state.clickMarker) { map.removeLayer(state.clickMarker); state.clickMarker = null; }
     if (state.selectRect) { map.removeLayer(state.selectRect); state.selectRect = null; }
