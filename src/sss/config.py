@@ -39,8 +39,8 @@ MODE_FILTER_WINDOW = 3
 # ── Mosaic weighting ─────────────────────────────────────────
 MOSAIC_WEIGHT_FLOOR = 0.05
 MOSAIC_FAR_ANGLE_PENALTY = 0.3
-IDW_SEARCH_RADIUS_M = 10
-IDW_NEIGHBORS = 8
+IDW_SEARCH_RADIUS_M = 1.5
+IDW_NEIGHBORS = 4
 
 # ── Waterfall rendering (slant→ground correction) ────────────
 MAX_GROUND_RANGE_M = 50.0
@@ -58,6 +58,9 @@ KALMAN_OUTLIER_SIGMA = 3.0
 # ── Gain normalization (Stage 2b) ────────────────────────────
 GAIN_NORM_PERCENTILE = 40           # ref percentile per (line, channel)
 GAIN_NORM_MIN_SAMPLES = 100         # skip groups smaller than this
+
+# ── Confidence (angular Gaussian) ────────────────────────────
+CONFIDENCE_ANGULAR_SIGMA_DEG = 12.0
 
 
 def get_far_cutoff(channel_or_freq):

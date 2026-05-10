@@ -20,13 +20,15 @@ mbes:
 
 sss:
   output_dir: outputs/tif
- 
+  hires_resolution_hf: 0.10
+  hires_resolution_lf: 0.20
+
   survey_dirs:
     - path: data/sss/20251223
       cable_length: 15.0
     - path: data/sss/20251224
       cable_length: null
- 
+
   cluster:
     method: kmeans
     k_init: 7
@@ -60,18 +62,20 @@ mag:
 
 
 cube:
-  reference_grid: outputs/tif/mbes_bathymetry.tif    # which layer defines the grid
+  reference_grid: outputs/tif/mbes_bathymetry.tif
   output: outputs/hydrospatial_datacube.nc
   layers:
     - { var: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      units: "m",      dtype: float32, kind: continuous,  desc: "Water depth (positive down)" }
     - { var: vrm,            path: outputs/tif/mbes_vrm.tif,             units: "",       dtype: float32, kind: continuous,  desc: "Vector ruggedness measure" }
     - { var: slope,          path: outputs/tif/mbes_slope.tif,           units: "degree", dtype: float32, kind: continuous,  desc: "Terrain slope" }
     - { var: bpi,            path: outputs/tif/mbes_bpi.tif,             units: "m",      dtype: float32, kind: continuous,  desc: "Bathymetric position index" }
-    - { var: bs_lf,          path: outputs/tif/sss_backscatter_lf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 230 kHz (LF)" }
-    - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB", dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
-    - { var: rl,             path: outputs/tif/sbp_rl.tif,               units: "dB", dtype: float32, kind: continuous,  desc: "Reflection loss" }
-    - { var: sediment_class, path: outputs/tif/sbp_sediment_class.tif,   units: "",   dtype: int8,    kind: categorical, desc: "Hamilton sediment classification" }
-    - { var: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          units: "nT", dtype: float32, kind: continuous,  desc: "Magnetic anomaly (F - IGRF)" }
+    - { var: bs_lf,          path: outputs/tif/sss_backscatter_lf.tif,   units: "dB",     dtype: float32, kind: continuous,  desc: "SSS backscatter, 230 kHz (LF)" }
+    - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB",     dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
+    - { var: bs_lf_conf,     path: outputs/tif/sss_confidence_lf.tif,    units: "",       dtype: float32, kind: continuous,  desc: "SSS LF confidence (angular Gaussian, 0-1)" }
+    - { var: bs_hf_conf,     path: outputs/tif/sss_confidence_hf.tif,    units: "",       dtype: float32, kind: continuous,  desc: "SSS HF confidence (angular Gaussian, 0-1)" }
+    - { var: rl,             path: outputs/tif/sbp_rl.tif,               units: "dB",     dtype: float32, kind: continuous,  desc: "Reflection loss" }
+    - { var: sediment_class, path: outputs/tif/sbp_sediment_class.tif,   units: "",       dtype: int8,    kind: categorical, desc: "Hamilton sediment classification" }
+    - { var: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          units: "nT",     dtype: float32, kind: continuous,  desc: "Magnetic anomaly (F - IGRF)" }
 
 viewer:
   netcdf: outputs/hydrospatial_datacube.nc
@@ -83,7 +87,7 @@ viewer:
 
   tile_layers:
     - { id: bathymetry,     path: outputs/tif/mbes_bathymetry.tif,      label: "Bathymetry",          palette: turbo_r }
-    - { id: imagery_hf,     path: outputs/tif/sss_backscatter_hf.tif,   label: "SSS Backscatter (HF)", palette: copper }
-    - { id: imagery_lf,     path: outputs/tif/sss_backscatter_lf.tif,   label: "SSS Backscatter (LF)", palette: copper }
+    - { id: imagery_hf,     path: outputs/tif/sss_backscatter_hf_hires.tif,   label: "SSS Backscatter (HF)", palette: copper }
+    - { id: imagery_lf,     path: outputs/tif/sss_backscatter_lf_hires.tif,   label: "SSS Backscatter (LF)", palette: copper }
     - { id: sediment_class, path: outputs/tif/sbp_sediment_rgb.tif,     label: "Sediment Class",      palette: null }
     - { id: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          label: "Magnetic Anomaly",    palette: rdbu }
