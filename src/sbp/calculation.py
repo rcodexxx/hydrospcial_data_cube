@@ -41,34 +41,16 @@ def _sample_depth():
 
 # ──────────────────────────────────────────────────────────
 # Sediment physical properties (density g/cc, Vp/Vw ratio)
-#
-# Grouped categories for freshwater reservoir environment:
-# - Sand classes (fine/very fine/silty) merged into one: Hamilton's
-#   sub-categories differ by <0.04 in vp_ratio, within noise floor.
-# - Silt and sandy silt merged: similar reasoning.
-# - Clayey silt and silty clay merged: differ only in clay/silt ratio
-#   (Shepard 1954 textural classification), acoustically equivalent.
-# - Partially consolidated mud: Holland (2002) AoI inversion at Sicily site,
-#   ρ=1.32 g/cc, SSR=0.979. Represents the typical unconsolidated-but-structured
-#   mud state defined in Holland et al. 2024 — distinct from Hamilton's
-#   continental-terrace clay (fully compacted, SSR≈1) and McAnally's fluid
-#   mud (suspension-like, ρ≈1.08-1.2). Reservoir post-dam sediments fit this
-#   intermediate range.
-# - Fluid mud: McAnally et al. 2007 high-concentration suspension. Vp from
-#   Wood (1941) suspension model at ρ=1.13 g/cc.
-#
-# Values for merged classes are arithmetic means of Hamilton (1980)
-# Table 1 originals.
 # ──────────────────────────────────────────────────────────
 SEDIMENT_PROPERTIES = [
     # (name, density_g_cc, vp_ratio)
-    ("Coarse sand",              2.034, 1.201),   # Hamilton 1980 Table IB
-    ("Fine sand / Silty sand",   1.876, 1.119),   # merged 3 Hamilton classes
-    ("Silt / Sandy silt",        1.777, 1.068),   # merged 2 Hamilton classes
-    ("Sand-silt-clay",           1.596, 1.033),   # Hamilton 1980 Table IB (was 1.590, fix)
-    ("Clayey silt / Silty clay", 1.455, 1.002),   # merged 2 Hamilton classes
-    ("Partially consolidated mud", 1.320, 0.979), # Holland 2002 Sicily, in situ AoI
-    ("Fluid mud",                1.130, 0.978),   # McAnally 2007, Wood model
+    ("Sand",                     1.943, 1.184),   
+    ("Silty sand / Sandy silt",  1.772, 1.107),   
+    ("Silt",                     1.740, 1.085),   
+    ("Sand-silt-clay",           1.596, 1.060),   
+    ("Clayey silt / Silty clay", 1.455, 1.030),   
+    ("Partially consolidated mud", 1.320, 0.989), 
+    ("Fluid mud",                1.100, 0.974),   
 ]
 
 
@@ -136,7 +118,7 @@ def print_threshold_table():
         _cached["data"], _cached["thresholds"]
     ):
         t_str = f"{t:.2f}" if t != float("inf") else "∞"
-        print(f"{name:<22s} {rho:9.0f} {vp:8.1f} {z:10.2e} "
+        print(f"{name:<22s} {rho:9.0f} {vp:8.1f} {z:10.3e} "
               f"{rl:7.2f} {t_str:>8s}")
 
 
