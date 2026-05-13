@@ -50,7 +50,7 @@ SEDIMENT_PROPERTIES = [
     ("Sand-silt-clay",           1.596, 1.060),   
     ("Clayey silt / Silty clay", 1.455, 1.030),   
     ("Partially consolidated mud", 1.320, 0.989), 
-    ("Fluid mud",                1.100, 0.974),   
+    ("Fluid mud",                1.183, 0.970),   
 ]
 
 
