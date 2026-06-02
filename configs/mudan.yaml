@@ -70,12 +70,16 @@ cube:
     - { var: slope,          path: outputs/tif/mbes_slope.tif,           units: "degree", dtype: float32, kind: continuous,  desc: "Terrain slope" }
     - { var: bpi,            path: outputs/tif/mbes_bpi.tif,             units: "m",      dtype: float32, kind: continuous,  desc: "Bathymetric position index" }
     - { var: bs_lf,          path: outputs/tif/sss_backscatter_lf.tif,   units: "dB",     dtype: float32, kind: continuous,  desc: "SSS backscatter, 230 kHz (LF)" }
-    - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB",     dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
     - { var: bs_lf_conf,     path: outputs/tif/sss_confidence_lf.tif,    units: "",       dtype: float32, kind: continuous,  desc: "SSS LF confidence (angular Gaussian, 0-1)" }
+    - { var: cluster_lf,     path: outputs/tif/sss_clusters_lf.tif,      units: "",       dtype: int8,    kind: categorical, desc: "SSS LF KMeans cluster ID (frequency-local, not comparable to HF)" }
+    - { var: bs_hf,          path: outputs/tif/sss_backscatter_hf.tif,   units: "dB",     dtype: float32, kind: continuous,  desc: "SSS backscatter, 850 kHz (HF)" }
     - { var: bs_hf_conf,     path: outputs/tif/sss_confidence_hf.tif,    units: "",       dtype: float32, kind: continuous,  desc: "SSS HF confidence (angular Gaussian, 0-1)" }
+    - { var: cluster_hf,     path: outputs/tif/sss_clusters_hf.tif,      units: "",       dtype: int8,    kind: categorical, desc: "SSS HF KMeans cluster ID (frequency-local, not comparable to LF)" }
     - { var: rl,             path: outputs/tif/sbp_rl.tif,               units: "dB",     dtype: float32, kind: continuous,  desc: "Reflection loss" }
     - { var: sediment_class, path: outputs/tif/sbp_sediment_class.tif,   units: "",       dtype: int8,    kind: categorical, desc: "Hamilton sediment classification" }
+    - { var: sbp_confidence, path: outputs/tif/sbp_confidence.tif, units: "", dtype: float32, kind: continuous, desc: "SBP confidence" }
     - { var: mag_anomaly,    path: outputs/tif/mag_anomaly.tif,          units: "nT",     dtype: float32, kind: continuous,  desc: "Magnetic anomaly (F - IGRF)" }
+    - { var: mag_confidence, path: outputs/tif/mag_confidence.tif, units: "", dtype: float32, kind: continuous, desc: "MAG confidence (IDW interpolation kernel weight)" }
 
 viewer:
   netcdf: outputs/hydrospatial_datacube.nc

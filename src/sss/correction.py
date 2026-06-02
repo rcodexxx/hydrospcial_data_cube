@@ -190,23 +190,12 @@ def run_clustering(zscore_waterfall, cluster_cfg):
 
     method = cluster_cfg["method"]
     if method == "kmeans":
-        bs_range = float(features.max() - features.min())
+        bs_range = float(np.percentile(features, 95) - np.percentile(features, 5))
         labels_flat = _kmeans_with_merge(
             features,
             k_init=cluster_cfg.get("k_init", 7),
             bs_range=bs_range,
         )
-    elif method == "hdbscan":
-        import hdbscan
-        n_valid = features.shape[0]
-        min_frac = cluster_cfg["min_cluster_fraction"]
-        min_cluster_size = max(int(n_valid * min_frac), 10)
-        clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=min_cluster_size,
-            min_samples=cluster_cfg["min_samples"],
-            core_dist_n_jobs=-1,
-        )
-        labels_flat = clusterer.fit_predict(features).astype(np.int16)
     else:
         raise ValueError(f"Unknown cluster method: {method}")
 

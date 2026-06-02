@@ -40,36 +40,62 @@ def _sample_depth():
 
 
 # ──────────────────────────────────────────────────────────
-# Sediment physical properties (density g/cc, Vp/Vw ratio)
+# Sediment physical properties (intrinsic to sediment, not water).
+# 
+# Vp_sed is treated as a sediment property independent of overlying
+# water type, consistent with Biot theory for low-frequency limit.
+# Hamilton (1980) Vp values are taken as published (seawater context);
+# the freshwater correction enters via z_water below, not via Vp_sed.
 # ──────────────────────────────────────────────────────────
 SEDIMENT_PROPERTIES = [
-    # (name, density_g_cc, vp_ratio)
-    ("Sand",                     1.943, 1.184),   
-    ("Silty sand / Sandy silt",  1.772, 1.107),   
-    ("Silt",                     1.740, 1.085),   
-    ("Sand-silt-clay",           1.596, 1.060),   
-    ("Clayey silt / Silty clay", 1.455, 1.030),   
-    ("Partially consolidated mud", 1.320, 0.989), 
-    ("Fluid mud",                1.183, 0.970),   
+    # (name, density_kg_m3, vp_m_s)
+    ("Sand",                       1943, 1776.0),   # Hamilton 1980
+    ("Silty sand / Sandy silt",    1772, 1660.5),   # Hamilton 1980 (merged)
+    ("Silt",                       1740, 1627.5),   # Hamilton 1980
+    ("Sand-silt-clay",             1596, 1590.0),   # Hamilton 1980
+    ("Clayey silt / Silty clay",   1455, 1545.0),   # Hamilton 1980 (merged)
+    ("Partially consolidated mud", 1320, 1480.0),   # Holland 2002 Sicily AoI
+    ("Fluid mud",                  1183, 1444.0),   # Wood eq. with freshwater
 ]
+# Note: Hamilton Vp values shown here are Vp_sed = (Vp/Vw_seawater) × 1500 m/s,
+# treating sediment Vp as intrinsic. Mud values are derived for freshwater
+# directly. See thesis §3.3.2 for derivation.
+
+
+# ──────────────────────────────────────────────────────────
+# Sediment physical properties (intrinsic to sediment, not water).
+# 
+# Vp_sed is treated as a sediment property independent of overlying
+# water type, consistent with Biot theory for low-frequency limit.
+# Hamilton (1980) Vp values are taken as published (seawater context);
+# the freshwater correction enters via z_water below, not via Vp_sed.
+# ──────────────────────────────────────────────────────────
+SEDIMENT_PROPERTIES = [
+    # (name, density_kg_m3, vp_m_s)
+    ("Sand",                       1943, 1776.0),   # Hamilton 1980
+    ("Silty sand / Sandy silt",    1772, 1660.5),   # Hamilton 1980 (merged)
+    ("Silt",                       1740, 1627.5),   # Hamilton 1980
+    ("Sand-silt-clay",             1596, 1590.0),   # Hamilton 1980
+    ("Clayey silt / Silty clay",   1455, 1545.0),   # Hamilton 1980 (merged)
+    ("Partially consolidated mud", 1320, 1480.0),   # Holland 2002 Sicily AoI
+    ("Fluid mud",                  1183, 1444.0),   # Wood eq. with freshwater
+]
+# Note: Hamilton Vp values shown here are Vp_sed = (Vp/Vw_seawater) × 1500 m/s,
+# treating sediment Vp as intrinsic. Mud values are derived for freshwater
+# directly. See thesis §3.3.2 for derivation.
 
 
 def _compute_rl_thresholds():
-    """
-    Derive per-sediment RL values and classification thresholds.
-    Called lazily (when SEDIMENT_THRESHOLDS first accessed).
-    """
-    c = _sound_speed()
-    z_w = _z_water()
+    c_w = _sound_speed()            # freshwater c
+    rho_w = 997.0                   # freshwater density at ~20°C
+    z_w = rho_w * c_w
 
     results = []
-    for name, rho_g_cc, vp_ratio in SEDIMENT_PROPERTIES:
-        rho = rho_g_cc * 1000.0
-        vp = vp_ratio * c
-        z_sed = rho * vp
+    for name, rho_sed, vp_sed in SEDIMENT_PROPERTIES:
+        z_sed = rho_sed * vp_sed
         r = abs((z_sed - z_w) / (z_sed + z_w))
         rl_db = -20.0 * np.log10(max(r, 1e-10))
-        results.append((name, rho, vp, z_sed, rl_db))
+        results.append((name, rho_sed, vp_sed, z_sed, rl_db))
 
     # Sort by RL ascending (strong reflector → weak reflector)
     results.sort(key=lambda x: x[4])

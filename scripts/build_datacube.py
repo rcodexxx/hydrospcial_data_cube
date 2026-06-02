@@ -25,6 +25,7 @@ def resample_to_ref(src_path, ref_transform, ref_crs,
                     ref_height, ref_width, resampling):
     """Reproject and resample a GeoTIFF onto the reference grid."""
     with rasterio.open(src_path) as src:
+        src_nodata = src.nodata
         data = np.full((ref_height, ref_width), np.nan, dtype=np.float32)
         reproject(
             source=rasterio.band(src, 1),
@@ -34,10 +35,10 @@ def resample_to_ref(src_path, ref_transform, ref_crs,
             dst_transform=ref_transform,
             dst_crs=ref_crs,
             resampling=resampling,
-            src_nodata=src.nodata,
+            src_nodata=src_nodata,
             dst_nodata=np.nan,
         )
-    return data
+    return data, src_nodata
 
 
 def categorical_to_float(arr, dtype):
@@ -94,8 +95,8 @@ def main():
 
         resamp = (Resampling.nearest if layer["kind"] == "categorical"
                   else Resampling.bilinear)
-        arr = resample_to_ref(src_path, ref_transform, ref_crs,
-                              ref_height, ref_width, resampling=resamp)
+        arr, _ = resample_to_ref(src_path, ref_transform, ref_crs,
+                         ref_height, ref_width, resampling=resamp)
 
         if layer["kind"] == "categorical":
             arr = categorical_to_float(arr, layer["dtype"])
